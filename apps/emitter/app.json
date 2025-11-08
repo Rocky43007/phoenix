@@ -18,7 +18,8 @@
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to emit messages to nearby devices.",
         "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to emit messages to nearby devices."
-      }
+      },
+      "appleTeamId": "9RQ7WD4TPJ"
     },
     "android": {
       "package": "com.phoenix.emitter",
