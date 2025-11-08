@@ -15,6 +15,7 @@ export const Button: React.FC<ButtonProps> = ({
   title,
   variant = 'primary',
   style,
+  disabled,
   ...props
 }) => {
   return (
@@ -22,11 +23,13 @@ export const Button: React.FC<ButtonProps> = ({
       style={[
         styles.button,
         variant === 'primary' ? styles.primary : styles.secondary,
+        disabled && styles.disabled,
         style,
       ]}
+      disabled={disabled}
       {...props}
     >
-      <Text style={styles.text}>{title}</Text>
+      <Text style={[styles.text, disabled && styles.disabledText]}>{title}</Text>
     </TouchableOpacity>
   );
 };
@@ -45,9 +48,16 @@ const styles = StyleSheet.create({
   secondary: {
     backgroundColor: '#6c757d',
   },
+  disabled: {
+    backgroundColor: '#CCCCCC',
+    opacity: 0.6,
+  },
   text: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  disabledText: {
+    color: '#999999',
   },
 });
