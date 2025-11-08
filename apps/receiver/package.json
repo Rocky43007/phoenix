@@ -6,24 +6,15 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web",
     "prebuild": "expo prebuild",
-    "prebuild:clean": "expo prebuild --clean",
-    "lint": "eslint .",
-    "type-check": "tsc --noEmit",
-    "clean": "rm -rf node_modules .expo ios/build android/build android/app/build"
+    "prebuild:clean": "expo prebuild --clean"
   },
   "dependencies": {
-    "@phoenix/beacon-protocol": "workspace:*",
-    "@phoenix/ui": "workspace:*",
-    "@phoenix/utils": "workspace:*",
-    "buffer": "^6.0.3",
     "expo": "~54.0.23",
     "expo-dev-client": "^6.0.17",
     "expo-status-bar": "~3.0.8",
     "react": "19.1.0",
-    "react-native": "0.81.5",
-    "react-native-ble-plx": "^3.5.0"
+    "react-native": "0.81.5"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

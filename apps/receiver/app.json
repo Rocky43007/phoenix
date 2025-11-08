@@ -7,46 +7,22 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "plugins": [
-      [
-        "react-native-ble-plx",
-        {
-          "isBackgroundEnabled": true,
-          "modes": ["central"],
-          "bluetoothAlwaysPermission": "Allow $(PRODUCT_NAME) to scan for nearby emergency beacons via Bluetooth."
-        }
-      ]
-    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.phoenix.receiver",
-      "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to receive messages from nearby devices.",
-        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to receive messages from nearby devices."
-      }
+      "supportsTablet": true
     },
     "android": {
-      "package": "com.phoenix.receiver",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "BLUETOOTH",
-        "BLUETOOTH_ADMIN",
-        "BLUETOOTH_SCAN",
-        "BLUETOOTH_CONNECT",
-        "BLUETOOTH_ADVERTISE",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
-      ]
+      "package": "com.rocky43007.receiver"
     },
     "web": {
       "favicon": "./assets/favicon.png"
