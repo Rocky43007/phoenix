@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@phoenix/ui": ["../../packages/ui/src"],
+      "@phoenix/utils": ["../../packages/utils/src"]
+    }
+  }
+}

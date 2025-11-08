@@ -1,0 +1,27 @@
+{
+  "name": "phoenix-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Phoenix monorepo with React Native applications",
+  "scripts": {
+    "dev:receiver": "pnpm --filter receiver start",
+    "dev:emitter": "pnpm --filter emitter start",
+    "build:receiver": "pnpm --filter receiver build",
+    "build:emitter": "pnpm --filter emitter build",
+    "lint": "pnpm -r lint",
+    "type-check": "pnpm -r type-check",
+    "clean": "pnpm -r clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.50.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}
