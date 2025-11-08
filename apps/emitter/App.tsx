@@ -1,18 +1,29 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ScrollView, View, StyleSheet } from 'react-native';
 import { Container, Text, Button } from '@phoenix/ui';
 import { APP_NAME } from '@phoenix/utils';
 import SensorDataModule, { AllSensorData } from './src/modules/SensorDataModule';
+import { BeaconTransmitter, TransmitterState } from './src/services/BeaconTransmitter';
 
 export default function App() {
   const [sensorData, setSensorData] = useState<AllSensorData | null>(null);
   const [isEmitting, setIsEmitting] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [permissionGranted, setPermissionGranted] = useState<boolean>(false);
+  const [transmitterState, setTransmitterState] = useState<TransmitterState | null>(null);
+  const transmitterRef = useRef<BeaconTransmitter | null>(null);
 
   useEffect(() => {
     requestPermissions();
+    initializeTransmitter();
+
+    return () => {
+      // Cleanup transmitter on unmount
+      if (transmitterRef.current) {
+        transmitterRef.current.destroy();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -29,6 +40,23 @@ export default function App() {
       if (interval) clearInterval(interval);
     };
   }, [isEmitting]);
+
+  const initializeTransmitter = async () => {
+    try {
+      const transmitter = new BeaconTransmitter();
+      transmitter.onStateChange((state) => {
+        setTransmitterState(state);
+        if (state.error) {
+          setError(state.error);
+        }
+      });
+      await transmitter.initialize();
+      transmitterRef.current = transmitter;
+    } catch (error) {
+      console.error('Failed to initialize transmitter:', error);
+      setError(`Transmitter init failed: ${error}`);
+    }
+  };
 
   const requestPermissions = async () => {
     try {
@@ -60,52 +88,16 @@ export default function App() {
     try {
       setError('');
 
-      // Request permissions if not already granted
-      if (!permissionGranted) {
-        const permResult = await SensorDataModule.requestLocationPermission();
-        if (permResult.status === 'authorized') {
-          setPermissionGranted(true);
-        }
+      if (!transmitterRef.current) {
+        throw new Error('Beacon transmitter not initialized');
       }
 
-      // Try to start location updates (will fail gracefully if no permission)
-      try {
-        await SensorDataModule.startLocationUpdates();
-      } catch (locError) {
-        console.log('Location updates unavailable:', locError);
-      }
-
-      // Try to start accelerometer updates (should work without permission)
-      try {
-        await SensorDataModule.startAccelerometerUpdates();
-      } catch (accelError) {
-        console.log('Accelerometer updates unavailable:', accelError);
-      }
-
-      // Try to start gyroscope updates (should work without permission)
-      try {
-        await SensorDataModule.startGyroscopeUpdates();
-      } catch (gyroError) {
-        console.log('Gyroscope updates unavailable:', gyroError);
-      }
-
-      // Try to start compass updates (may require location permission)
-      try {
-        await SensorDataModule.startCompassUpdates();
-      } catch (compassError) {
-        console.log('Compass updates unavailable:', compassError);
-      }
-
-      // Try to start altimeter updates (should work without permission)
-      try {
-        await SensorDataModule.startAltimeterUpdates();
-      } catch (altError) {
-        console.log('Altimeter updates unavailable:', altError);
-      }
+      // Start beacon transmission (handles sensor startup internally)
+      await transmitterRef.current.startAdvertising();
 
       setIsEmitting(true);
 
-      // Get initial sensor data (will show null for unavailable sensors)
+      // Get initial sensor data for UI display
       await updateSensorData();
     } catch (error) {
       console.error('Error starting emission:', error);
@@ -115,11 +107,11 @@ export default function App() {
 
   const stopEmitting = async () => {
     try {
-      await SensorDataModule.stopLocationUpdates();
-      await SensorDataModule.stopAccelerometerUpdates();
-      await SensorDataModule.stopGyroscopeUpdates();
-      await SensorDataModule.stopCompassUpdates();
-      await SensorDataModule.stopAltimeterUpdates();
+      if (!transmitterRef.current) {
+        return;
+      }
+
+      await transmitterRef.current.stopAdvertising();
       setIsEmitting(false);
     } catch (error) {
       console.error('Error stopping emission:', error);
@@ -158,7 +150,7 @@ export default function App() {
 
           <View style={[styles.statusIndicator, isEmitting && styles.statusActive]}>
             <Text variant="caption" style={styles.statusText}>
-              {isEmitting ? '🟢 ACTIVE' : '⚫ INACTIVE'}
+              {isEmitting ? 'ACTIVE' : 'INACTIVE'}
             </Text>
           </View>
         </View>
@@ -168,6 +160,25 @@ export default function App() {
             <Text variant="caption" style={styles.errorText}>{error}</Text>
           </View>
         ) : null}
+
+        {transmitterState && (
+          <View style={styles.beaconStatus}>
+            <Text variant="body" style={styles.sectionTitle}>Beacon Transmission</Text>
+            <View style={styles.dataCard}>
+              <Text variant="caption" style={styles.dataText}>
+                Status: {transmitterState.status.toUpperCase()}
+              </Text>
+              <Text variant="caption" style={styles.dataText}>
+                Packets sent: {transmitterState.transmissionCount}
+              </Text>
+              {transmitterState.lastTransmission && (
+                <Text variant="caption" style={styles.dataText}>
+                  Last transmission: {new Date(transmitterState.lastTransmission).toLocaleTimeString()}
+                </Text>
+              )}
+            </View>
+          </View>
+        )}
 
         {sensorData && (
           <View style={styles.dataSection}>
@@ -371,6 +382,9 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#721C24',
+  },
+  beaconStatus: {
+    marginBottom: 20,
   },
   dataSection: {
     marginTop: 20,

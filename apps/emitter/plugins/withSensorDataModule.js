@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Expo Config Plugin for SensorDataModule
+ * Expo Config Plugin for Native Modules
  *
  * This plugin:
  * 1. Copies native Swift/ObjC files from native-modules/ to ios/ folder
@@ -20,6 +20,8 @@ const path = require('path');
 const NATIVE_FILES = [
   'SensorDataModule.swift',
   'SensorDataModule.m',
+  'BLEPeripheralManager.swift',
+  'BLEPeripheralManager.m',
   'emitter-Bridging-Header.h',
 ];
 
@@ -38,7 +40,14 @@ const withNativeModuleFiles = (config) => {
       console.log('📦 Copying native module files...');
 
       // Copy Swift and ObjC files to root of ios folder
-      for (const file of ['SensorDataModule.swift', 'SensorDataModule.m']) {
+      const modulesToCopy = [
+        'SensorDataModule.swift',
+        'SensorDataModule.m',
+        'BLEPeripheralManager.swift',
+        'BLEPeripheralManager.m',
+      ];
+
+      for (const file of modulesToCopy) {
         const sourcePath = path.join(sourceDir, file);
         const targetPath = path.join(targetDir, file);
 
@@ -77,24 +86,22 @@ const withXcodeProjectModifications = (config) => {
     // Add Swift and ObjC files to the project
     // Note: The files should already be in the ios folder from withNativeModuleFiles
 
-    // Add SensorDataModule.swift
-    if (!xcodeProject.hasFile('SensorDataModule.swift')) {
-      xcodeProject.addSourceFile(
-        'SensorDataModule.swift',
-        {},
-        xcodeProject.findPBXGroupKey({ name: appName })
-      );
-      console.log('  ✓ Added SensorDataModule.swift to Xcode project');
-    }
+    const moduleFiles = [
+      'SensorDataModule.swift',
+      'SensorDataModule.m',
+      'BLEPeripheralManager.swift',
+      'BLEPeripheralManager.m',
+    ];
 
-    // Add SensorDataModule.m
-    if (!xcodeProject.hasFile('SensorDataModule.m')) {
-      xcodeProject.addSourceFile(
-        'SensorDataModule.m',
-        {},
-        xcodeProject.findPBXGroupKey({ name: appName })
-      );
-      console.log('  ✓ Added SensorDataModule.m to Xcode project');
+    for (const file of moduleFiles) {
+      if (!xcodeProject.hasFile(file)) {
+        xcodeProject.addSourceFile(
+          file,
+          {},
+          xcodeProject.findPBXGroupKey({ name: appName })
+        );
+        console.log(`  ✓ Added ${file} to Xcode project`);
+      }
     }
 
     // Configure Swift bridging header
@@ -137,13 +144,13 @@ const withBackgroundLocationMode = (config) => {
  * Main plugin export
  */
 module.exports = function withSensorDataModule(config) {
-  console.log('\n🚀 Running SensorDataModule config plugin...\n');
+  console.log('\n🚀 Running Native Modules config plugin...\n');
 
   config = withNativeModuleFiles(config);
   config = withXcodeProjectModifications(config);
   config = withBackgroundLocationMode(config);
 
-  console.log('✅ SensorDataModule plugin completed\n');
+  console.log('✅ Native Modules plugin completed (SensorDataModule, BLEPeripheralManager)\n');
 
   return config;
 };

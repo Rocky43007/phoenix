@@ -14,8 +14,10 @@
     "clean": "rm -rf node_modules .expo ios/build android/build android/app/build"
   },
   "dependencies": {
+    "@phoenix/beacon-protocol": "workspace:*",
     "@phoenix/ui": "workspace:*",
     "@phoenix/utils": "workspace:*",
+    "buffer": "^6.0.3",
     "expo": "~54.0.23",
     "expo-dev-client": "^6.0.17",
     "expo-status-bar": "~3.0.8",
