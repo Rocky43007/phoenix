@@ -7,6 +7,9 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "plugins": [
+      "./plugins/withSensorDataModule"
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -16,8 +19,13 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.phoenix.emitter",
       "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to emit messages to nearby devices.",
-        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to emit messages to nearby devices."
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to emit emergency beacon signals to nearby rescue devices during disaster situations.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to emit emergency beacon signals to nearby rescue devices during disaster situations.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app collects your location data to help rescue teams find you during emergency situations, even when the app is in the background.",
+        "NSLocationWhenInUseUsageDescription": "This app collects your location data to help rescue teams find you during emergency situations.",
+        "NSLocationAlwaysUsageDescription": "This app collects your location data to help rescue teams find you during emergency situations, even when the app is in the background.",
+        "NSMotionUsageDescription": "This app uses motion sensors to detect falls and activity patterns that may help locate you during emergency situations.",
+        "UIBackgroundModes": ["location"]
       },
       "appleTeamId": "9RQ7WD4TPJ"
     },
