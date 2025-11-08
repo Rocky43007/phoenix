@@ -16,12 +16,17 @@ import type { EncoderInput } from './types';
 export function encodeBeaconData(input: EncoderInput): Buffer {
   const buffer = Buffer.alloc(PACKET_SIZE);
 
-  // Device ID (6 bytes)
+  // Device ID (4 bytes)
   const deviceIdBuffer = typeof input.deviceId === 'string'
     ? Buffer.from(input.deviceId.replace(/:/g, ''), 'hex')
     : input.deviceId;
 
-  deviceIdBuffer.copy(buffer, PACKET_OFFSETS.DEVICE_ID, 0, 6);
+  // Take only first 4 bytes if longer, or pad with zeros if shorter
+  if (deviceIdBuffer.length >= 4) {
+    deviceIdBuffer.copy(buffer, PACKET_OFFSETS.DEVICE_ID, 0, 4);
+  } else {
+    deviceIdBuffer.copy(buffer, PACKET_OFFSETS.DEVICE_ID);
+  }
 
   // Latitude (4 bytes, Float32, big-endian)
   buffer.writeFloatBE(input.latitude, PACKET_OFFSETS.LATITUDE);
@@ -82,11 +87,11 @@ export function macToBuffer(mac: string): Buffer {
 /**
  * Helper: Generate a pseudo-random device ID
  *
- * @returns 6-byte buffer with random device ID
+ * @returns 4-byte buffer with random device ID (4 billion unique IDs)
  */
 export function generateDeviceId(): Buffer {
-  const buffer = Buffer.alloc(6);
-  for (let i = 0; i < 6; i++) {
+  const buffer = Buffer.alloc(4);
+  for (let i = 0; i < 4; i++) {
     buffer[i] = Math.floor(Math.random() * 256);
   }
   return buffer;

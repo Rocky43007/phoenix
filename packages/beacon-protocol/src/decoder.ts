@@ -1,14 +1,14 @@
 /**
  * Binary Decoder for Phoenix Emergency Beacon Protocol
  *
- * Decodes 22-byte binary packets into structured BeaconData
+ * Decodes 20-byte binary packets into structured BeaconData
  */
 
-import { PACKET_SIZE, PACKET_OFFSETS, FLAGS } from './constants';
+import { PACKET_SIZE, PACKET_OFFSETS, PACKET_SIZES, FLAGS } from './constants';
 import type { BeaconData, BeaconFlags } from './types';
 
 /**
- * Decode a 22-byte binary buffer into BeaconData
+ * Decode a 20-byte binary buffer into BeaconData
  *
  * @param buffer - Binary packet data
  * @returns Decoded beacon data
@@ -19,9 +19,9 @@ export function decodeBeaconData(buffer: Buffer): BeaconData {
     throw new Error(`Invalid packet size: expected ${PACKET_SIZE}, got ${buffer.length}`);
   }
 
-  // Device ID (6 bytes) - convert to hex string
-  const deviceIdBuffer = buffer.slice(PACKET_OFFSETS.DEVICE_ID, PACKET_OFFSETS.DEVICE_ID + 6);
-  const deviceId = bufferToMacAddress(deviceIdBuffer);
+  // Device ID (4 bytes) - convert to hex string
+  const deviceIdBuffer = buffer.slice(PACKET_OFFSETS.DEVICE_ID, PACKET_OFFSETS.DEVICE_ID + PACKET_SIZES.DEVICE_ID);
+  const deviceId = bufferToDeviceId(deviceIdBuffer);
 
   // Latitude (4 bytes, Float32, big-endian)
   const latitude = buffer.readFloatBE(PACKET_OFFSETS.LATITUDE);
@@ -65,10 +65,23 @@ export function decodeBeaconData(buffer: Buffer): BeaconData {
 }
 
 /**
- * Convert 6-byte buffer to MAC address string
+ * Convert 4-byte buffer to device ID string
  *
- * @param buffer - 6-byte device ID
- * @returns MAC address string (e.g., "AA:BB:CC:DD:EE:FF")
+ * @param buffer - 4-byte device ID
+ * @returns Device ID string (e.g., "0A:2B:3C:4D")
+ */
+export function bufferToDeviceId(buffer: Buffer): string {
+  if (buffer.length !== 4) {
+    throw new Error('Device ID must be 4 bytes');
+  }
+  return Array.from(buffer)
+    .map((byte) => byte.toString(16).padStart(2, '0').toUpperCase())
+    .join(':');
+}
+
+/**
+ * Legacy: Convert 6-byte buffer to MAC address string
+ * @deprecated Use bufferToDeviceId for new 4-byte format
  */
 export function bufferToMacAddress(buffer: Buffer): string {
   if (buffer.length !== 6) {

@@ -68,17 +68,44 @@ class BLEPeripheralManager: NSObject {
         return
       }
 
+      // Validate beacon data is 20 bytes
+      if data.count != 20 {
+        reject("INVALID_DATA", "Beacon data must be 20 bytes, got \(data.count)", nil)
+        return
+      }
+
       self.advertisingData = data
 
-      // Company identifier for manufacturer data (using a test company ID)
-      // In production, you should register for an official company ID
-      let companyID: UInt16 = 0xFFFF // Test/development company ID
+      // Use Apple's company ID for iBeacon compatibility
+      let companyID: UInt16 = 0x004C // Apple Inc.
 
-      // Build manufacturer data: [company ID (2 bytes little-endian)] + [beacon data (22 bytes)]
+      // Format as iBeacon: [Type(0x02), Length(0x15), UUID(16), Major(2), Minor(2), TxPower(1)]
+      // Total: 23 bytes iBeacon data
+      var ibeaconData = Data()
+
+      // iBeacon type and length
+      ibeaconData.append(0x02) // Type
+      ibeaconData.append(0x15) // Length (21 bytes)
+
+      // UUID (16 bytes): first 16 bytes of beacon data
+      ibeaconData.append(data.prefix(16))
+
+      // Major (2 bytes): bytes 16-17 of beacon data
+      ibeaconData.append(data[16])
+      ibeaconData.append(data[17])
+
+      // Minor (2 bytes): bytes 18-19 of beacon data
+      ibeaconData.append(data[18])
+      ibeaconData.append(data[19])
+
+      // Measured Power (-59 dBm at 1m)
+      ibeaconData.append(UInt8(bitPattern: -59))
+
+      // Build manufacturer data: [company ID (2 bytes little-endian)] + [iBeacon data (23 bytes)]
       var manufacturerData = Data()
       manufacturerData.append(UInt8(companyID & 0xFF))
       manufacturerData.append(UInt8((companyID >> 8) & 0xFF))
-      manufacturerData.append(data)
+      manufacturerData.append(ibeaconData)
 
       // Create advertising data
       let advertisementData: [String: Any] = [
@@ -90,8 +117,9 @@ class BLEPeripheralManager: NSObject {
       peripheralManager.startAdvertising(advertisementData)
       self.isAdvertising = true
 
-      print("Started BLE advertising with \(data.count) bytes of beacon data")
-      print("Manufacturer data: \(manufacturerData.map { String(format: "%02X", $0) }.joined())")
+      print("Started iBeacon advertising with \(data.count) bytes of beacon data")
+      print("iBeacon data: \(ibeaconData.map { String(format: "%02X", $0) }.joined())")
+      print("Full manufacturer data (Company ID + iBeacon): \(manufacturerData.map { String(format: "%02X", $0) }.joined())")
 
       resolve([
         "advertising": true,

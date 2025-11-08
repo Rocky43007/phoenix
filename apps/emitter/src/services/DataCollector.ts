@@ -68,7 +68,7 @@ export class DataCollector {
     const motionDetected = this.detectMotion(sensorData);
     const isCharging = sensorData.battery.isCharging;
     const lowBattery = sensorData.battery.level < 0.2 && sensorData.battery.level >= 0;
-    const gpsValid = sensorData.location !== null &&
+    const gpsValid = sensorData.location != null && // checks both null and undefined
                      typeof sensorData.location.accuracy === 'number' &&
                      sensorData.location.accuracy < 100; // GPS accuracy < 100m
     const stationary = !motionDetected; // Inverse of motion (for now)

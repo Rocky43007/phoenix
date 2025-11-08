@@ -23,9 +23,23 @@ export {
 export {
   decodeBeaconData,
   bufferToMacAddress,
+  bufferToDeviceId,
   hexToBuffer,
   isValidBeaconPacket,
 } from './decoder';
+
+// Export iBeacon utilities
+export {
+  beaconToIBeacon,
+  ibeaconToBeacon,
+  createIBeaconManufacturerData,
+  isIBeacon,
+  ibeaconToHex,
+  IBEACON_COMPANY_ID,
+  IBEACON_TYPE,
+  IBEACON_LENGTH,
+  IBEACON_MEASURED_POWER,
+} from './ibeacon';
 
 // Export clustering functions
 export {

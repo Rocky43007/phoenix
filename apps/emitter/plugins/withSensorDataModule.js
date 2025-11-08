@@ -3,18 +3,18 @@ const {
   withXcodeProject,
   withInfoPlist,
   IOSConfig,
+  AndroidConfig,
 } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
 /**
- * Expo Config Plugin for Native Modules
+ * Expo Config Plugin for Native Modules (Emitter)
  *
  * This plugin:
- * 1. Copies native Swift/ObjC files from native-modules/ to ios/ folder
- * 2. Adds files to Xcode project
- * 3. Configures Swift bridging header
- * 4. Adds UIBackgroundModes for location tracking
+ * 1. iOS: Copies Swift/ObjC files and configures Xcode
+ * 2. Android: Copies Kotlin files and registers package
+ * 3. Adds background location support
  */
 
 const NATIVE_FILES = [
@@ -141,16 +141,126 @@ const withBackgroundLocationMode = (config) => {
 };
 
 /**
+ * Copy Android native module files
+ */
+const withAndroidNativeModuleFiles = (config) => {
+  return withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const projectRoot = config.modRequest.projectRoot;
+      const sourceDir = path.join(projectRoot, 'native-modules', 'android');
+      const androidDir = config.modRequest.platformProjectRoot;
+
+      // Get package name from config
+      const packageName = AndroidConfig.Package.getPackage(config) || 'com.rocky43007.emitter';
+      const packagePath = packageName.replace(/\./g, '/');
+      const targetDir = path.join(androidDir, 'app', 'src', 'main', 'java', packagePath);
+
+      console.log('📦 Copying Android native module files...');
+
+      // Ensure target directory exists
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      const androidFiles = [
+        'BLEPeripheralManager.kt',
+        'SensorDataModule.kt',
+        'EmitterModulesPackage.kt',
+      ];
+
+      for (const file of androidFiles) {
+        const sourcePath = path.join(sourceDir, file);
+        const targetPath = path.join(targetDir, file);
+
+        if (fs.existsSync(sourcePath)) {
+          // Read and update package name
+          let content = fs.readFileSync(sourcePath, 'utf8');
+          content = content.replace(/package com\.rocky43007\.emitter/, `package ${packageName}`);
+
+          fs.writeFileSync(targetPath, content);
+          console.log(`  ✓ Copied ${file}`);
+        } else {
+          console.warn(`  ⚠️  Source file not found: ${file}`);
+        }
+      }
+
+      return config;
+    },
+  ]);
+};
+
+/**
+ * Modify Android MainApplication to register the package
+ */
+const withAndroidMainApplication = (config) => {
+  return withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const androidDir = config.modRequest.platformProjectRoot;
+      const packageName = AndroidConfig.Package.getPackage(config) || 'com.rocky43007.emitter';
+      const packagePath = packageName.replace(/\./g, '/');
+      const mainApplicationPath = path.join(
+        androidDir,
+        'app',
+        'src',
+        'main',
+        'java',
+        packagePath,
+        'MainApplication.kt'
+      );
+
+      console.log('🔧 Configuring Android MainApplication...');
+
+      if (fs.existsSync(mainApplicationPath)) {
+        let content = fs.readFileSync(mainApplicationPath, 'utf8');
+
+        // Check if already registered
+        if (!content.includes('add(EmitterModulesPackage())')) {
+          // Add import
+          if (!content.includes(`import ${packageName}.EmitterModulesPackage`)) {
+            content = content.replace(
+              /(package .+\n)/,
+              `$1\nimport ${packageName}.EmitterModulesPackage\n`
+            );
+          }
+
+          // Add package to the list (works with new architecture)
+          content = content.replace(
+            /(\/\/ add\(MyReactNativePackage\(\)\))/,
+            `$1\n              add(EmitterModulesPackage())`
+          );
+
+          fs.writeFileSync(mainApplicationPath, content);
+          console.log('  ✓ Registered EmitterModulesPackage');
+        } else {
+          console.log('  ℹ️  EmitterModulesPackage already registered');
+        }
+      } else {
+        console.warn('  ⚠️  MainApplication.kt not found');
+      }
+
+      return config;
+    },
+  ]);
+};
+
+/**
  * Main plugin export
  */
 module.exports = function withSensorDataModule(config) {
-  console.log('\n🚀 Running Native Modules config plugin...\n');
+  console.log('\n🚀 Running Emitter Native Modules config plugin...\n');
 
+  // iOS setup
   config = withNativeModuleFiles(config);
   config = withXcodeProjectModifications(config);
   config = withBackgroundLocationMode(config);
 
-  console.log('✅ Native Modules plugin completed (SensorDataModule, BLEPeripheralManager)\n');
+  // Android setup
+  config = withAndroidNativeModuleFiles(config);
+  config = withAndroidMainApplication(config);
+
+  console.log('✅ Native Modules plugin completed (iOS + Android)\n');
 
   return config;
 };

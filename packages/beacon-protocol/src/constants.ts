@@ -9,22 +9,22 @@ export const BEACON_SERVICE_UUID = '0000FEED-0000-1000-8000-00805F9B34FB';
 export const BEACON_COMMAND_CHAR_UUID = '0000FEEE-0000-1000-8000-00805F9B34FB';
 export const BEACON_STATUS_CHAR_UUID = '0000FEEF-0000-1000-8000-00805F9B34FB';
 
-// Packet Structure (22 bytes total)
-export const PACKET_SIZE = 22;
+// Packet Structure (20 bytes total - optimized for iBeacon)
+export const PACKET_SIZE = 20;
 
 export const PACKET_OFFSETS = {
-  DEVICE_ID: 0,        // 6 bytes - MAC address or UUID
-  LATITUDE: 6,         // 4 bytes - Float32
-  LONGITUDE: 10,       // 4 bytes - Float32
-  ALTITUDE_MSL: 14,    // 2 bytes - Int16 (meters above sea level)
-  RELATIVE_ALT: 16,    // 2 bytes - Int16 (cm from start, for floor detection)
-  BATTERY: 18,         // 1 byte  - 0-100%
-  TIMESTAMP: 19,       // 2 bytes - Uint16 (seconds since boot)
-  FLAGS: 21,           // 1 byte  - Bit flags
+  DEVICE_ID: 0,        // 4 bytes - UUID (reduced from 6 for iBeacon compatibility)
+  LATITUDE: 4,         // 4 bytes - Float32
+  LONGITUDE: 8,        // 4 bytes - Float32
+  ALTITUDE_MSL: 12,    // 2 bytes - Int16 (meters above sea level)
+  RELATIVE_ALT: 14,    // 2 bytes - Int16 (cm from start, for floor detection)
+  BATTERY: 16,         // 1 byte  - 0-100%
+  TIMESTAMP: 17,       // 2 bytes - Uint16 (seconds since boot)
+  FLAGS: 19,           // 1 byte  - Bit flags
 } as const;
 
 export const PACKET_SIZES = {
-  DEVICE_ID: 6,
+  DEVICE_ID: 4,
   LATITUDE: 4,
   LONGITUDE: 4,
   ALTITUDE_MSL: 2,
