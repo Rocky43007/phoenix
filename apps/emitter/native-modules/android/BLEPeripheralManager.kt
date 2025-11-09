@@ -37,13 +37,33 @@ class BLEPeripheralManager(reactContext: ReactApplicationContext) :
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
             super.onStartSuccess(settingsInEffect)
             isAdvertising = true
-            Log.d(TAG, "BLE advertising started successfully")
+            val successMessage = buildString {
+                append("\n========================================\n")
+                append("ADVERTISING STARTED SUCCESSFULLY\n")
+                append("========================================\n")
+                append("Phoenix beacon is now broadcasting!\n")
+                append("Company ID: 0x0075 (Samsung)\n")
+                append("Data format: Custom 20-byte (not iBeacon)\n")
+                append("TX Power: ${settingsInEffect.txPowerLevel}\n")
+                append("Mode: ${settingsInEffect.mode}\n")
+                append("========================================")
+            }
+            Log.d(TAG, successMessage)
+            NativeLogger.info(TAG, successMessage)
         }
 
         override fun onStartFailure(errorCode: Int) {
             super.onStartFailure(errorCode)
             isAdvertising = false
-            Log.e(TAG, "BLE advertising failed: ${getAdvertiseErrorMessage(errorCode)}")
+            val errorMessage = buildString {
+                append("\n========================================\n")
+                append("ADVERTISING FAILED TO START\n")
+                append("========================================\n")
+                append("Error: ${getAdvertiseErrorMessage(errorCode)}\n")
+                append("========================================")
+            }
+            Log.e(TAG, errorMessage)
+            NativeLogger.error(TAG, errorMessage)
         }
     }
 
@@ -79,14 +99,17 @@ class BLEPeripheralManager(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun startAdvertising(beaconDataHex: String, promise: Promise) {
         try {
-            if (isAdvertising) {
-                promise.reject("ALREADY_ADVERTISING", "Already advertising")
-                return
-            }
-
             if (bluetoothLeAdvertiser == null) {
                 promise.reject("BLE_UNAVAILABLE", "BLE advertiser is not available")
                 return
+            }
+
+            // Force stop any existing advertising first
+            try {
+                bluetoothLeAdvertiser!!.stopAdvertising(advertiseCallback)
+                Thread.sleep(100) // Give it time to stop
+            } catch (e: Exception) {
+                Log.d(TAG, "Stop advertising (expected if not running): ${e.message}")
             }
 
             // Convert hex string to byte array
@@ -97,29 +120,31 @@ class BLEPeripheralManager(reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Use Apple's company ID for iBeacon compatibility
-            val companyId = 0x004C
+            // Use Samsung's company ID (0x0075) for better Android compatibility
+            val companyId = 0x0075
+            val phoenixMagic = 0x5048 // "PH" - Phoenix beacon identifier
 
-            // Format as iBeacon: [Type(0x02), Length(0x15), UUID(16), Major(2), Minor(2), TxPower(1)]
-            val ibeaconData = ByteArray(23)
+            // Build manufacturer data: [magic (2 bytes)] + [beacon data (20 bytes)]
+            // Total: 22 bytes (company ID is added automatically by Android API)
+            val manufacturerData = ByteArray(22)
+            manufacturerData[0] = (phoenixMagic and 0xFF).toByte()
+            manufacturerData[1] = ((phoenixMagic shr 8) and 0xFF).toByte()
+            System.arraycopy(beaconData, 0, manufacturerData, 2, 20)
 
-            // iBeacon type and length
-            ibeaconData[0] = 0x02.toByte()
-            ibeaconData[1] = 0x15.toByte()
-
-            // UUID (16 bytes): first 16 bytes of beacon data
-            System.arraycopy(beaconData, 0, ibeaconData, 2, 16)
-
-            // Major (2 bytes): bytes 16-17 of beacon data
-            System.arraycopy(beaconData, 16, ibeaconData, 18, 2)
-
-            // Minor (2 bytes): bytes 18-19 of beacon data
-            System.arraycopy(beaconData, 18, ibeaconData, 20, 2)
-
-            // Measured Power (-59 dBm at 1m)
-            ibeaconData[22] = (-59).toByte()
-
-            Log.d(TAG, "iBeacon data: ${ibeaconData.joinToString("") { String.format("%02X", it) }}")
+            val logMessage = buildString {
+                append("\n========================================\n")
+                append("PREPARING TO BROADCAST PHOENIX BEACON\n")
+                append("========================================\n")
+                append("Company ID: 0x${String.format("%04X", companyId)}\n")
+                append("Phoenix Magic: 0x${String.format("%04X", phoenixMagic)} (\"PH\")\n")
+                append("Beacon data length: ${beaconData.size} bytes\n")
+                append("Beacon data: ${beaconData.joinToString("") { String.format("%02X", it) }}\n")
+                append("Manufacturer data: ${manufacturerData.joinToString("") { String.format("%02X", it) }}\n")
+                append("Format: [Magic:2] [Data:20] = 22 bytes\n")
+                append("========================================")
+            }
+            Log.d(TAG, logMessage)
+            NativeLogger.info(TAG, logMessage)
 
             // Configure advertising settings
             val settings = AdvertiseSettings.Builder()
@@ -128,15 +153,21 @@ class BLEPeripheralManager(reactContext: ReactApplicationContext) :
                 .setConnectable(false)
                 .build()
 
-            // Configure advertising data with iBeacon format
-            // Note: NOT including device name to stay within 31-byte BLE advertisement limit
+            // Configure advertising data with Phoenix beacon format
+            // NOTE: Advertising packet limited to 31 bytes
+            // Manufacturer data takes ~26 bytes, so NO room for device name
             val advertiseData = AdvertiseData.Builder()
-                .addManufacturerData(companyId, ibeaconData)
-                .setIncludeDeviceName(false)
+                .addManufacturerData(companyId, manufacturerData)
+                .setIncludeDeviceName(false)  // No name - exceeds 31-byte limit
                 .build()
 
-            // Start advertising
-            bluetoothLeAdvertiser!!.startAdvertising(settings, advertiseData, advertiseCallback)
+            // Set scan response with device name (separate 31-byte packet)
+            val scanResponse = AdvertiseData.Builder()
+                .setIncludeDeviceName(true)  // Phone's Bluetooth name goes here
+                .build()
+
+            // Start advertising with scan response
+            bluetoothLeAdvertiser!!.startAdvertising(settings, advertiseData, scanResponse, advertiseCallback)
 
             val result = Arguments.createMap().apply {
                 putBoolean("isAdvertising", true)

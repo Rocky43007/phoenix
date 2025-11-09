@@ -1,4 +1,4 @@
-const { withDangerousMod, withPlugins } = require('@expo/config-plugins');
+const { withDangerousMod, withPlugins, withXcodeProject, AndroidConfig } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -7,38 +7,91 @@ const path = require('path');
  */
 function withReceiverNativeModules(config) {
   return withPlugins(config, [
-    // iOS: Copy BLEBeaconScanner Swift and Objective-C files
+    // iOS: Copy native module files
     (config) => {
       return withDangerousMod(config, [
         'ios',
         async (config) => {
+          const projectRoot = config.modRequest.projectRoot;
           const iosProjectRoot = config.modRequest.platformProjectRoot;
-          const projectName = path.basename(iosProjectRoot.replace(/\.xcodeproj$/, ''));
-          const iosSourceDir = path.join(iosProjectRoot, projectName);
+          const appName = config.modRequest.projectName || 'receiver';
+          const nativeModulesDir = path.join(projectRoot, 'native-modules', 'ios');
 
-          // Source files
-          const nativeModulesDir = path.join(config.modRequest.projectRoot, 'native-modules', 'ios');
-          const swiftSource = path.join(nativeModulesDir, 'BLEBeaconScanner.swift');
-          const objcSource = path.join(nativeModulesDir, 'BLEBeaconScanner.m');
+          console.log('📦 Copying native module files to iOS...');
 
-          // Destination
-          const swiftDest = path.join(iosSourceDir, 'BLEBeaconScanner.swift');
-          const objcDest = path.join(iosSourceDir, 'BLEBeaconScanner.m');
+          // Copy Swift and ObjC files to iOS root folder
+          const modulesToCopy = [
+            'BLEBeaconScanner.swift',
+            'BLEBeaconScanner.m',
+            'NativeLogger.swift',
+            'NativeLogger.m',
+          ];
 
-          // Copy files
-          if (fs.existsSync(swiftSource)) {
-            fs.copyFileSync(swiftSource, swiftDest);
-            console.log('✅ Copied BLEBeaconScanner.swift to iOS project');
+          for (const file of modulesToCopy) {
+            const sourcePath = path.join(nativeModulesDir, file);
+            const targetPath = path.join(iosProjectRoot, file);
+
+            if (fs.existsSync(sourcePath)) {
+              fs.copyFileSync(sourcePath, targetPath);
+              console.log(`  ✓ Copied ${file}`);
+            }
           }
 
-          if (fs.existsSync(objcSource)) {
-            fs.copyFileSync(objcSource, objcDest);
-            console.log('✅ Copied BLEBeaconScanner.m to iOS project');
+          // Copy bridging header to app folder
+          const bridgingHeaderSource = path.join(nativeModulesDir, 'receiver-Bridging-Header.h');
+          const bridgingHeaderTarget = path.join(iosProjectRoot, appName, `${appName}-Bridging-Header.h`);
+
+          if (fs.existsSync(bridgingHeaderSource)) {
+            fs.copyFileSync(bridgingHeaderSource, bridgingHeaderTarget);
+            console.log(`  ✓ Copied ${appName}-Bridging-Header.h`);
           }
 
           return config;
         },
       ]);
+    },
+
+    // iOS: Add files to Xcode project and configure Swift
+    (config) => {
+      return withXcodeProject(config, (config) => {
+        const xcodeProject = config.modResults;
+        const appName = config.modRequest.projectName || 'receiver';
+
+        console.log('🔧 Configuring Xcode project...');
+
+        // Add source files to Xcode project
+        const moduleFiles = [
+          'BLEBeaconScanner.swift',
+          'BLEBeaconScanner.m',
+          'NativeLogger.swift',
+          'NativeLogger.m',
+        ];
+
+        for (const file of moduleFiles) {
+          if (!xcodeProject.hasFile(file)) {
+            xcodeProject.addSourceFile(
+              file,
+              {},
+              xcodeProject.findPBXGroupKey({ name: appName })
+            );
+            console.log(`  ✓ Added ${file} to Xcode project`);
+          }
+        }
+
+        // Configure Swift bridging header and version
+        const configurations = xcodeProject.pbxXCBuildConfigurationSection();
+        const bridgingHeaderPath = `${appName}/${appName}-Bridging-Header.h`;
+
+        for (const key in configurations) {
+          if (typeof configurations[key] === 'object' && configurations[key].buildSettings) {
+            configurations[key].buildSettings.SWIFT_OBJC_BRIDGING_HEADER = bridgingHeaderPath;
+            configurations[key].buildSettings.SWIFT_VERSION = '5.0';
+          }
+        }
+        console.log('  ✓ Configured Swift bridging header and version');
+
+        return config;
+      });
     },
 
     // Android: Copy BLEBeaconScanner Kotlin file
@@ -47,7 +100,10 @@ function withReceiverNativeModules(config) {
         'android',
         async (config) => {
           const androidProjectRoot = config.modRequest.platformProjectRoot;
-          const packagePath = 'com/phoenix/receiver';
+
+          // Get package name from config
+          const packageName = AndroidConfig.Package.getPackage(config) || 'com.rocky43007.receiver';
+          const packagePath = packageName.replace(/\./g, '/');
           const androidSourceDir = path.join(
             androidProjectRoot,
             'app',
@@ -57,52 +113,98 @@ function withReceiverNativeModules(config) {
             packagePath
           );
 
-          // Source file
-          const nativeModulesDir = path.join(config.modRequest.projectRoot, 'native-modules', 'android');
-          const kotlinSource = path.join(nativeModulesDir, 'BLEBeaconScanner.kt');
+          console.log('📦 Copying Android native modules...');
+          console.log(`  Package: ${packageName}`);
 
-          // Destination
-          const kotlinDest = path.join(androidSourceDir, 'BLEBeaconScanner.kt');
+          // Source files
+          const nativeModulesDir = path.join(config.modRequest.projectRoot, 'native-modules', 'android');
 
           // Ensure directory exists
           fs.mkdirSync(androidSourceDir, { recursive: true });
 
-          // Copy file
-          if (fs.existsSync(kotlinSource)) {
-            fs.copyFileSync(kotlinSource, kotlinDest);
-            console.log('✅ Copied BLEBeaconScanner.kt to Android project');
+          const filesToCopy = [
+            'BLEBeaconScanner.kt',
+            'BLEBeaconScannerPackage.kt',
+            'NativeLogger.kt',
+            'NativeLoggerPackage.kt',
+          ];
+
+          // Copy files and update package names
+          for (const file of filesToCopy) {
+            const sourcePath = path.join(nativeModulesDir, file);
+            const destPath = path.join(androidSourceDir, file);
+
+            if (fs.existsSync(sourcePath)) {
+              // Read and update package name
+              let content = fs.readFileSync(sourcePath, 'utf8');
+              content = content.replace(/package com\.phoenix\.receiver/, `package ${packageName}`);
+
+              fs.writeFileSync(destPath, content);
+              console.log(`  ✓ Copied ${file}`);
+            }
           }
 
           // Read MainApplication.kt to add module to package list
           const mainApplicationPath = path.join(androidSourceDir, 'MainApplication.kt');
 
+          console.log('🔧 Configuring Android MainApplication...');
+
           if (fs.existsSync(mainApplicationPath)) {
             let mainAppContent = fs.readFileSync(mainApplicationPath, 'utf8');
+            let modified = false;
 
-            // Check if BLEBeaconScanner is already added
-            if (!mainAppContent.includes('BLEBeaconScanner()')) {
-              // Find the packages list and add our module
-              const packagesListRegex = /(override fun getPackages\(\): List<ReactPackage> \{[\s\S]*?return listOf\([\s\S]*?)(packages\.addAll\(PackageList\(this\)\.packages\))/;
+            // Add BLEBeaconScanner if not already added
+            if (!mainAppContent.includes('BLEBeaconScanner(')) {
+              // Look for the comment line where we can add modules
+              const addPackageComment = /(\/\/ add\(MyReactNativePackage\(\)\))/;
 
-              if (packagesListRegex.test(mainAppContent)) {
-                // Add BLEBeaconScanner to the packages list
+              if (addPackageComment.test(mainAppContent)) {
                 mainAppContent = mainAppContent.replace(
-                  /(packages\.addAll\(PackageList\(this\)\.packages\))/,
-                  `packages.add(ReactPackage { BLEBeaconScanner(reactContext) })\n        $1`
+                  addPackageComment,
+                  `$1\n              add(BLEBeaconScannerPackage())`
                 );
 
-                // Ensure BLEBeaconScanner class is imported (add after other imports)
-                if (!mainAppContent.includes('import com.phoenix.receiver.BLEBeaconScanner')) {
+                // Add import using dynamic package name
+                if (!mainAppContent.includes(`import ${packageName}.BLEBeaconScanner`)) {
                   mainAppContent = mainAppContent.replace(
-                    /(package com\.phoenix\.receiver\n)/,
-                    '$1\nimport com.phoenix.receiver.BLEBeaconScanner\n'
+                    new RegExp(`(package ${packageName.replace(/\./g, '\\.')}\\n)`),
+                    `$1\nimport ${packageName}.BLEBeaconScanner\nimport ${packageName}.BLEBeaconScannerPackage\n`
                   );
                 }
 
-                fs.writeFileSync(mainApplicationPath, mainAppContent, 'utf8');
-                console.log('✅ Added BLEBeaconScanner to Android MainApplication');
+                modified = true;
+                console.log('  ✓ Added BLEBeaconScanner');
               }
             }
+
+            // Add NativeLogger if not already added
+            if (!mainAppContent.includes('NativeLogger(')) {
+              const addPackageComment = /(\/\/ add\(MyReactNativePackage\(\)\))/;
+
+              if (addPackageComment.test(mainAppContent)) {
+                mainAppContent = mainAppContent.replace(
+                  addPackageComment,
+                  `$1\n              add(NativeLoggerPackage())`
+                );
+
+                // Add import using dynamic package name
+                if (!mainAppContent.includes(`import ${packageName}.NativeLogger`)) {
+                  mainAppContent = mainAppContent.replace(
+                    new RegExp(`(package ${packageName.replace(/\./g, '\\.')}\\n)`),
+                    `$1\nimport ${packageName}.NativeLogger\nimport ${packageName}.NativeLoggerPackage\n`
+                  );
+                }
+
+                modified = true;
+                console.log('  ✓ Added NativeLogger');
+              }
+            }
+
+            if (modified) {
+              fs.writeFileSync(mainApplicationPath, mainAppContent, 'utf8');
+            }
+          } else {
+            console.warn('  ⚠️  MainApplication.kt not found');
           }
 
           return config;

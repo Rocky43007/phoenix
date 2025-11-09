@@ -45,6 +45,8 @@ const withNativeModuleFiles = (config) => {
         'SensorDataModule.m',
         'BLEPeripheralManager.swift',
         'BLEPeripheralManager.m',
+        'NativeLogger.swift',
+        'NativeLogger.m',
       ];
 
       for (const file of modulesToCopy) {
@@ -91,6 +93,8 @@ const withXcodeProjectModifications = (config) => {
       'SensorDataModule.m',
       'BLEPeripheralManager.swift',
       'BLEPeripheralManager.m',
+      'NativeLogger.swift',
+      'NativeLogger.m',
     ];
 
     for (const file of moduleFiles) {
@@ -166,6 +170,7 @@ const withAndroidNativeModuleFiles = (config) => {
       const androidFiles = [
         'BLEPeripheralManager.kt',
         'SensorDataModule.kt',
+        'NativeLogger.kt',
         'EmitterModulesPackage.kt',
       ];
 

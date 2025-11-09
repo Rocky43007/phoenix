@@ -102,24 +102,102 @@ class SensorDataModule(reactContext: ReactApplicationContext) :
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
                 Log.w(TAG, "Location permission not granted")
+                NativeLogger.warn(TAG, "Location permission not granted")
                 promise.reject("PERMISSION_DENIED", "Location permission not granted")
                 return
             }
 
             Log.d(TAG, "Starting location updates...")
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                1000, // 1 second
-                0f,   // 0 meters
-                locationListener
-            )
+            NativeLogger.info(TAG, "Starting location updates...")
 
-            Log.d(TAG, "Location updates started successfully")
+            // Try to get last known location first (instant fallback)
+            try {
+                val lastGpsLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                val lastNetworkLocation = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+
+                // Use the most recent one
+                val lastLocation = when {
+                    lastGpsLocation != null && lastNetworkLocation != null -> {
+                        if (lastGpsLocation.time > lastNetworkLocation.time) lastGpsLocation else lastNetworkLocation
+                    }
+                    lastGpsLocation != null -> lastGpsLocation
+                    lastNetworkLocation != null -> lastNetworkLocation
+                    else -> null
+                }
+
+                if (lastLocation != null) {
+                    currentLocation = lastLocation
+                    val msg = "Got last known location: ${lastLocation.latitude}, ${lastLocation.longitude}, age: ${(System.currentTimeMillis() - lastLocation.time) / 1000}s, accuracy: ${lastLocation.accuracy}m"
+                    Log.d(TAG, msg)
+                    NativeLogger.info(TAG, msg)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not get last known location: ${e.message}")
+            }
+
+            // Request updates from both GPS and Network providers for faster fix
+            var gpsStarted = false
+            var networkStarted = false
+
+            // Try GPS provider (most accurate)
+            try {
+                if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        1000, // 1 second
+                        0f,   // 0 meters
+                        locationListener
+                    )
+                    gpsStarted = true
+                    Log.d(TAG, "GPS location updates started")
+                    NativeLogger.info(TAG, "GPS location updates started")
+                } else {
+                    Log.w(TAG, "GPS provider is disabled")
+                    NativeLogger.warn(TAG, "GPS provider is disabled - please enable Location Services")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to start GPS updates: ${e.message}")
+            }
+
+            // Try Network provider (faster, less accurate)
+            try {
+                if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        1000, // 1 second
+                        0f,   // 0 meters
+                        locationListener
+                    )
+                    networkStarted = true
+                    Log.d(TAG, "Network location updates started")
+                    NativeLogger.info(TAG, "Network location updates started")
+                } else {
+                    Log.w(TAG, "Network provider is disabled")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to start Network updates: ${e.message}")
+            }
+
+            if (!gpsStarted && !networkStarted) {
+                val msg = "No location providers available. Please enable GPS in Settings."
+                Log.e(TAG, msg)
+                NativeLogger.error(TAG, msg)
+                promise.reject("NO_PROVIDER", msg)
+                return
+            }
+
+            val statusMsg = "Location updates started (GPS: $gpsStarted, Network: $networkStarted)"
+            Log.d(TAG, statusMsg)
+            NativeLogger.info(TAG, statusMsg)
+
             promise.resolve(Arguments.createMap().apply {
                 putBoolean("started", true)
+                putBoolean("gpsStarted", gpsStarted)
+                putBoolean("networkStarted", networkStarted)
             })
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start location updates", e)
+            NativeLogger.error(TAG, "Failed to start location updates: ${e.message}")
             promise.reject("ERROR", "Failed to start location updates: ${e.message}")
         }
     }
@@ -350,10 +428,15 @@ class SensorDataModule(reactContext: ReactApplicationContext) :
                 putDouble("longitude", location.longitude)
                 putDouble("altitude", location.altitude)
                 putDouble("accuracy", location.accuracy.toDouble())
+                putDouble("speed", location.speed.toDouble())
+                putDouble("heading", location.bearing.toDouble())
+                putDouble("timestamp", location.time.toDouble())
             })
-            Log.d(TAG, "getAllSensorData: Location available - ${location.latitude}, ${location.longitude}")
+            val age = (System.currentTimeMillis() - location.time) / 1000
+            Log.d(TAG, "getAllSensorData: Location available - ${location.latitude}, ${location.longitude}, accuracy: ${location.accuracy}m, age: ${age}s")
         } else {
             Log.d(TAG, "getAllSensorData: No location data available")
+            NativeLogger.warn(TAG, "No location data available - check if GPS is enabled")
         }
 
         // Accelerometer

@@ -72,16 +72,19 @@ class BLEBeaconScanner: RCTEventEmitter {
 
       // Start scanning for all devices (no service UUID filter)
       // We'll filter in the discovery callback
+      // Allow duplicates to get continuous RSSI updates
       centralManager.scanForPeripherals(
         withServices: nil,
         options: [
-          CBCentralManagerScanOptionAllowDuplicatesKey: true
+          CBCentralManagerScanOptionAllowDuplicatesKey: true,
+          CBCentralManagerScanOptionSolicitedServiceUUIDsKey: []
         ]
       )
 
       self.isScanning = true
 
       print("BLE beacon scanning started")
+      NativeLogger.info("BLE beacon scanning started")
 
       if self.hasListeners {
         self.sendEvent(withName: "onScanningStateChange", body: [
@@ -110,6 +113,7 @@ class BLEBeaconScanner: RCTEventEmitter {
       self.isScanning = false
 
       print("BLE beacon scanning stopped")
+      NativeLogger.info("BLE beacon scanning stopped")
 
       if self.hasListeners {
         self.sendEvent(withName: "onScanningStateChange", body: [
@@ -157,37 +161,41 @@ class BLEBeaconScanner: RCTEventEmitter {
     }
   }
 
-  private func parseIBeaconData(_ manufacturerData: Data) -> [String: Any]? {
-    // Manufacturer data format: [Company ID (2 bytes)] + [iBeacon data]
-    // iBeacon data: [Type (0x02)] + [Length (0x15)] + [UUID (16)] + [Major (2)] + [Minor (2)] + [TxPower (1)]
+  private func parsePhoenixBeaconData(_ manufacturerData: Data) -> [String: Any]? {
+    // Manufacturer data format: [Company ID (2)] + [Magic (2)] + [Beacon data (20)] = 24 bytes
 
-    guard manufacturerData.count >= 25 else {
+    guard manufacturerData.count >= 24 else {
       return nil
     }
 
-    // Check Company ID (0x004C for Apple, little-endian)
+    // Check Company ID (accept both 0x004C = Apple and 0x0075 = Samsung, little-endian)
+    // iOS emitter uses Apple ID, Android emitter uses Samsung ID
     let companyID = UInt16(manufacturerData[0]) | (UInt16(manufacturerData[1]) << 8)
-    guard companyID == 0x004C else {
+    guard companyID == 0x004C || companyID == 0x0075 else {
       return nil
     }
 
-    // Check iBeacon type and length
-    guard manufacturerData[2] == 0x02 && manufacturerData[3] == 0x15 else {
+    // Validate exactly 24 bytes total
+    guard manufacturerData.count == 24 else {
+      print("Not Phoenix beacon - size: \(manufacturerData.count) bytes (expected 24)")
       return nil
     }
 
-    // Extract 20-byte beacon data from iBeacon format
-    // UUID (16 bytes) + Major (2 bytes) + Minor (2 bytes) = 20 bytes
-    var beaconData = Data()
-    beaconData.append(manufacturerData[4..<20])  // UUID (16 bytes)
-    beaconData.append(manufacturerData[20..<22]) // Major (2 bytes)
-    beaconData.append(manufacturerData[22..<24]) // Minor (2 bytes)
+    // Check for Phoenix magic number (0x5048 = "PH", little-endian)
+    let magic = UInt16(manufacturerData[2]) | (UInt16(manufacturerData[3]) << 8)
+    guard magic == 0x5048 else {
+      print("Not Phoenix beacon - magic: 0x\(String(format: "%04X", magic)) (expected 0x5048)")
+      return nil
+    }
 
-    // Extract measured power (TX power at 1m)
-    let measuredPower = Int8(bitPattern: manufacturerData[24])
+    // Extract 20-byte beacon data (skip first 4 bytes: company ID + magic)
+    let beaconData = manufacturerData[4..<24]
 
     // Convert to hex string
     let hexData = beaconData.map { String(format: "%02X", $0) }.joined()
+
+    // Default measured power for distance estimation
+    let measuredPower = -59
 
     return [
       "beaconData": hexData,
@@ -203,7 +211,9 @@ extension BLEBeaconScanner: CBCentralManagerDelegate {
 
   func centralManagerDidUpdateState(_ central: CBCentralManager) {
     let state = stateToString(central.state)
-    print("BLE Central Manager state changed: \(state)")
+    let stateMsg = "BLE Central Manager state changed: \(state)"
+    print(stateMsg)
+    NativeLogger.info(stateMsg)
 
     // If scanning and state changed to non-poweredOn, stop scanning
     if central.state != .poweredOn && isScanning {
@@ -218,20 +228,37 @@ extension BLEBeaconScanner: CBCentralManagerDelegate {
 
   func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
 
+    // Log device to Xcode console (verbose)
+    print("BLE Device: \(peripheral.name ?? "No Name") RSSI: \(RSSI)")
+
+    if let manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data {
+      let hexData = manufacturerData.map { String(format: "%02X", $0) }.joined()
+      let companyID = manufacturerData.count >= 2 ? UInt16(manufacturerData[0]) | (UInt16(manufacturerData[1]) << 8) : 0
+      print("  Company ID: 0x\(String(format: "%04X", companyID)) Data: \(hexData)")
+    }
+
     // Extract manufacturer data
     guard let manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data else {
       return
     }
 
-    // Parse iBeacon data
-    guard let beaconInfo = parseIBeaconData(manufacturerData) else {
+    // Parse Phoenix beacon data
+    guard let beaconInfo = parsePhoenixBeaconData(manufacturerData) else {
       return
     }
 
-    print("🔍 PHOENIX BEACON DETECTED!")
-    print("  Device: \(peripheral.name ?? peripheral.identifier.uuidString)")
-    print("  RSSI: \(RSSI)")
-    print("  Beacon Data: \(beaconInfo["beaconData"] ?? "")")
+    let beaconDetected = """
+
+    ========================================
+    *** PHOENIX BEACON DETECTED ***
+    ========================================
+    Device: \(peripheral.name ?? peripheral.identifier.uuidString)
+    RSSI: \(RSSI) dBm
+    Beacon Data: \(beaconInfo["beaconData"] ?? "")
+    ========================================
+    """
+    print(beaconDetected)
+    NativeLogger.info(beaconDetected)
 
     // Send event to React Native
     if hasListeners {

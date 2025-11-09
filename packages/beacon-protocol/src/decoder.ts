@@ -50,6 +50,8 @@ export function decodeBeaconData(buffer: Buffer): BeaconData {
     lowBattery: !!(flagsByte & FLAGS.LOW_BATTERY),
     gpsValid: !!(flagsByte & FLAGS.GPS_VALID),
     stationary: !!(flagsByte & FLAGS.STATIONARY),
+    fallDetected: !!(flagsByte & FLAGS.FALL_DETECTED),
+    unstableEnvironment: !!(flagsByte & FLAGS.UNSTABLE_ENV),
   };
 
   return {

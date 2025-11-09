@@ -13,6 +13,12 @@ export class DataCollector {
   private startAltitude: number = 0;
   private bootTime: number = Date.now();
 
+  // Fall detection state
+  private accelerationHistory: number[] = [];
+  private gyroscopeHistory: number[] = [];
+  private fallDetectedTime: number = 0;
+  private FALL_COOLDOWN_MS = 60000; // 1 minute cooldown after fall detected
+
   constructor(deviceId: string) {
     this.deviceId = deviceId;
   }
@@ -68,10 +74,19 @@ export class DataCollector {
     const motionDetected = this.detectMotion(sensorData);
     const isCharging = sensorData.battery.isCharging;
     const lowBattery = sensorData.battery.level < 0.2 && sensorData.battery.level >= 0;
+
+    // GPS is valid if location exists and accuracy is reasonable
+    // Relaxed threshold for disaster scenarios where any GPS is better than none
+    const gpsAccuracy = sensorData.location?.accuracy ?? 999;
     const gpsValid = sensorData.location != null && // checks both null and undefined
                      typeof sensorData.location.accuracy === 'number' &&
-                     sensorData.location.accuracy < 100; // GPS accuracy < 100m
+                     sensorData.location.accuracy < 200; // GPS accuracy < 200m (relaxed for emergency use)
+
     const stationary = !motionDetected; // Inverse of motion (for now)
+
+    // Advanced motion analysis
+    const fallDetected = this.detectFall(sensorData);
+    const unstableEnvironment = this.detectUnstableEnvironment(sensorData);
 
     return {
       deviceId: this.deviceId,
@@ -87,6 +102,8 @@ export class DataCollector {
       lowBattery,
       gpsValid,
       stationary,
+      fallDetected,
+      unstableEnvironment,
     };
   }
 
@@ -116,6 +133,112 @@ export class DataCollector {
 
     // No motion sensors available, assume stationary
     return false;
+  }
+
+  /**
+   * Detect fall using accelerometer data
+   *
+   * Fall detection algorithm:
+   * 1. Detect free fall (sudden drop in acceleration < 0.5g)
+   * 2. Detect impact (sudden spike > 2.5g)
+   * 3. Detect horizontal orientation after impact
+   *
+   * @param sensorData - Current sensor readings
+   * @returns true if fall detected
+   */
+  private detectFall(sensorData: AllSensorData): boolean {
+    if (!sensorData.accelerometer) {
+      return false;
+    }
+
+    // Check cooldown - don't spam fall alerts
+    if (this.fallDetectedTime > 0 && Date.now() - this.fallDetectedTime < this.FALL_COOLDOWN_MS) {
+      return true; // Keep flag active during cooldown
+    }
+
+    const { x, y, z } = sensorData.accelerometer;
+    const magnitude = Math.sqrt(x * x + y * y + z * z);
+
+    // Track acceleration history (keep last 10 readings)
+    this.accelerationHistory.push(magnitude);
+    if (this.accelerationHistory.length > 10) {
+      this.accelerationHistory.shift();
+    }
+
+    // Need at least 5 readings to detect pattern
+    if (this.accelerationHistory.length < 5) {
+      return false;
+    }
+
+    // Look for fall pattern in last 10 samples
+    const recent = this.accelerationHistory.slice(-10);
+
+    // Stage 1: Detect free fall (low g-force < 0.5g)
+    const hasFreeFall = recent.some(a => a < 0.5);
+
+    // Stage 2: Detect impact (high g-force > 2.5g)
+    const hasImpact = recent.some(a => a > 2.5);
+
+    // Stage 3: Check if device is now horizontal (person lying down)
+    // Z-axis should be close to ±1g if lying flat
+    const isHorizontal = Math.abs(Math.abs(z) - 1.0) < 0.3 &&
+                         Math.abs(x) < 0.5 &&
+                         Math.abs(y) < 0.5;
+
+    // Fall detected if we saw free fall, then impact, and now horizontal
+    if (hasFreeFall && hasImpact && isHorizontal) {
+      this.fallDetectedTime = Date.now();
+      console.warn('⚠️ FALL DETECTED - Person may need assistance');
+      return true;
+    }
+
+    return this.fallDetectedTime > 0 && Date.now() - this.fallDetectedTime < this.FALL_COOLDOWN_MS;
+  }
+
+  /**
+   * Detect unstable environment (earthquake, building collapse, etc.)
+   *
+   * Detection based on sustained high-frequency vibration
+   *
+   * @param sensorData - Current sensor readings
+   * @returns true if environment is unstable
+   */
+  private detectUnstableEnvironment(sensorData: AllSensorData): boolean {
+    if (!sensorData.gyroscope) {
+      return false;
+    }
+
+    const { x, y, z } = sensorData.gyroscope;
+    const rotationMagnitude = Math.sqrt(x * x + y * y + z * z);
+
+    // Track gyroscope history (keep last 20 readings)
+    this.gyroscopeHistory.push(rotationMagnitude);
+    if (this.gyroscopeHistory.length > 20) {
+      this.gyroscopeHistory.shift();
+    }
+
+    // Need at least 10 readings
+    if (this.gyroscopeHistory.length < 10) {
+      return false;
+    }
+
+    // Calculate average rotation over last 20 samples
+    const avgRotation = this.gyroscopeHistory.reduce((a, b) => a + b, 0) / this.gyroscopeHistory.length;
+
+    // Calculate variance (measure of vibration intensity)
+    const variance = this.gyroscopeHistory.reduce((sum, val) => {
+      return sum + Math.pow(val - avgRotation, 2);
+    }, 0) / this.gyroscopeHistory.length;
+
+    // High sustained rotation AND high variance indicates unstable environment
+    // (earthquake, collapsing building, violent shaking)
+    const isUnstable = avgRotation > 1.0 && variance > 0.5;
+
+    if (isUnstable) {
+      console.warn('⚠️ UNSTABLE ENVIRONMENT DETECTED - High vibration/shaking');
+    }
+
+    return isUnstable;
   }
 
   /**

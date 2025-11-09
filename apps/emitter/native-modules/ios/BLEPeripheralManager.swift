@@ -76,45 +76,49 @@ class BLEPeripheralManager: NSObject {
 
       self.advertisingData = data
 
-      // Use Apple's company ID for iBeacon compatibility
-      let companyID: UInt16 = 0x004C // Apple Inc.
+      // Use Apple's company ID (0x004C) - required for iOS to actually broadcast manufacturer data
+      // We use our own custom format with Phoenix magic number
+      let companyID: UInt16 = 0x004C
+      let phoenixMagic: UInt16 = 0x5048 // "PH" - Phoenix beacon identifier
 
-      // Format as iBeacon: [Type(0x02), Length(0x15), UUID(16), Major(2), Minor(2), TxPower(1)]
-      // Total: 23 bytes iBeacon data
-      var ibeaconData = Data()
-
-      // iBeacon type and length
-      ibeaconData.append(0x02) // Type
-      ibeaconData.append(0x15) // Length (21 bytes)
-
-      // UUID (16 bytes): first 16 bytes of beacon data
-      ibeaconData.append(data.prefix(16))
-
-      // Major (2 bytes): bytes 16-17 of beacon data
-      ibeaconData.append(data[16])
-      ibeaconData.append(data[17])
-
-      // Minor (2 bytes): bytes 18-19 of beacon data
-      ibeaconData.append(data[18])
-      ibeaconData.append(data[19])
-
-      // Measured Power (-59 dBm at 1m)
-      ibeaconData.append(UInt8(bitPattern: -59))
-
-      // Build manufacturer data: [company ID (2 bytes little-endian)] + [iBeacon data (23 bytes)]
+      // Build manufacturer data: [company ID (2)] + [magic (2)] + [beacon data (20)]
+      // iOS requires company ID to be included in the data
       var manufacturerData = Data()
-      manufacturerData.append(UInt8(companyID & 0xFF))
-      manufacturerData.append(UInt8((companyID >> 8) & 0xFF))
-      manufacturerData.append(contentsOf: ibeaconData)
+      let companyIDLowByte = UInt8(companyID & 0xFF)
+      let companyIDHighByte = UInt8((companyID >> 8) & 0xFF)
+      let magicLowByte = UInt8(phoenixMagic & 0xFF)
+      let magicHighByte = UInt8((phoenixMagic >> 8) & 0xFF)
 
-      print("iBeacon data length: \(ibeaconData.count)")
-      print("Manufacturer data length: \(manufacturerData.count)")
-      print("iBeacon data: \(ibeaconData.map { String(format: "%02X", $0) }.joined())")
-      print("Full manufacturer data: \(manufacturerData.map { String(format: "%02X", $0) }.joined())")
+      manufacturerData.append(companyIDLowByte)
+      manufacturerData.append(companyIDHighByte)
+      manufacturerData.append(magicLowByte)
+      manufacturerData.append(magicHighByte)
+      manufacturerData.append(contentsOf: data)
+
+      // Detailed logging
+      let logMessage = """
+
+      ========================================
+      PREPARING TO BROADCAST PHOENIX BEACON
+      ========================================
+      Company ID: 0x\(String(format: "%04X", companyID))
+      Phoenix Magic: 0x\(String(format: "%04X", phoenixMagic)) ("PH")
+      Beacon data length: \(data.count) bytes
+      Beacon data: \(data.map { String(format: "%02X", $0) }.joined())
+      Manufacturer data length: \(manufacturerData.count) bytes
+      Full manufacturer data: \(manufacturerData.map { String(format: "%02X", $0) }.joined())
+      Format: [CompanyID:2] [Magic:2] [Data:20] = 24 bytes
+      ========================================
+      """
+      print(logMessage)
+      NativeLogger.info(logMessage)
 
       // Create advertising data
-      // Note: NOT including device name to stay within BLE advertisement size limits
+      // NOTE: BLE advertising packet limited to 31 bytes total!
+      // Manufacturer data (~27 bytes) leaves only ~4 bytes for name
+      // Solution: Remove local name to prioritize manufacturer data
       let advertisementData: [String: Any] = [
+        // CBAdvertisementDataLocalNameKey: "PHX", // Removed - causes manufacturer data to be dropped
         CBAdvertisementDataManufacturerDataKey: manufacturerData
       ]
 
@@ -122,7 +126,7 @@ class BLEPeripheralManager: NSObject {
       peripheralManager.startAdvertising(advertisementData)
       self.isAdvertising = true
 
-      print("Started iBeacon advertising with \(data.count) bytes of beacon data")
+      print("Started Phoenix beacon advertising with \(data.count) bytes of beacon data")
 
       resolve([
         "advertising": true,
@@ -240,10 +244,30 @@ extension BLEPeripheralManager: CBPeripheralManagerDelegate {
 
   func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
     if let error = error {
-      print("Error starting advertising: \(error.localizedDescription)")
+      let errorMessage = """
+
+      ========================================
+      ADVERTISING FAILED TO START
+      ========================================
+      Error: \(error.localizedDescription)
+      ========================================
+      """
+      print(errorMessage)
+      NativeLogger.error(errorMessage)
       isAdvertising = false
     } else {
-      print("Successfully started advertising")
+      let successMessage = """
+
+      ========================================
+      ADVERTISING STARTED SUCCESSFULLY
+      ========================================
+      Phoenix beacon is now broadcasting!
+      Company ID: 0x004C (Apple - required for iOS)
+      Data format: Custom 20-byte (not iBeacon)
+      ========================================
+      """
+      print(successMessage)
+      NativeLogger.info(successMessage)
       isAdvertising = true
     }
   }

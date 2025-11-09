@@ -17,10 +17,14 @@ export interface ScanningStateChangeEvent {
 }
 
 class BLEBeaconScannerModule {
-  private eventEmitter: NativeEventEmitter;
+  private eventEmitter: NativeEventEmitter | null = null;
 
   constructor() {
-    this.eventEmitter = new NativeEventEmitter(NativeBLEBeaconScanner);
+    if (NativeBLEBeaconScanner) {
+      this.eventEmitter = new NativeEventEmitter(NativeBLEBeaconScanner);
+    } else {
+      console.warn('BLEBeaconScanner module not available');
+    }
   }
 
   /**
@@ -61,14 +65,22 @@ class BLEBeaconScannerModule {
   /**
    * Listen for beacon discovered events
    */
-  onBeaconDiscovered(callback: (event: BeaconDiscoveredEvent) => void): EmitterSubscription {
+  onBeaconDiscovered(callback: (event: BeaconDiscoveredEvent) => void): EmitterSubscription | null {
+    if (!this.eventEmitter) {
+      console.warn('BLEBeaconScanner not available - cannot listen to events');
+      return null;
+    }
     return this.eventEmitter.addListener('onBeaconDiscovered', callback);
   }
 
   /**
    * Listen for scanning state changes
    */
-  onScanningStateChange(callback: (event: ScanningStateChangeEvent) => void): EmitterSubscription {
+  onScanningStateChange(callback: (event: ScanningStateChangeEvent) => void): EmitterSubscription | null {
+    if (!this.eventEmitter) {
+      console.warn('BLEBeaconScanner not available - cannot listen to events');
+      return null;
+    }
     return this.eventEmitter.addListener('onScanningStateChange', callback);
   }
 }

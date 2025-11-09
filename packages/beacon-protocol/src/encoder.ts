@@ -54,6 +54,8 @@ export function encodeBeaconData(input: EncoderInput): Buffer {
   if (input.lowBattery) flagsByte |= FLAGS.LOW_BATTERY;
   if (input.gpsValid) flagsByte |= FLAGS.GPS_VALID;
   if (input.stationary) flagsByte |= FLAGS.STATIONARY;
+  if (input.fallDetected) flagsByte |= FLAGS.FALL_DETECTED;
+  if (input.unstableEnvironment) flagsByte |= FLAGS.UNSTABLE_ENV;
 
   buffer.writeUInt8(flagsByte, PACKET_OFFSETS.FLAGS);
 

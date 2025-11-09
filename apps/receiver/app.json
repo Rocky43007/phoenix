@@ -8,15 +8,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "plugins": [
-      "./plugins/withReceiverNativeModules.js",
-      [
-        "react-native-ble-plx",
-        {
-          "isBackgroundEnabled": false,
-          "modes": ["peripheral", "central"],
-          "bluetoothAlwaysPermission": "Allow $(PRODUCT_NAME) to scan for emergency beacons via Bluetooth"
-        }
-      ]
+      "./plugins/withReceiverNativeModules.js"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",

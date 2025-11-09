@@ -9,7 +9,8 @@ class EmitterModulesPackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
         return listOf(
             BLEPeripheralManager(reactContext),
-            SensorDataModule(reactContext)
+            SensorDataModule(reactContext),
+            NativeLogger(reactContext)
         )
     }
 

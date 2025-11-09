@@ -1,25 +1,36 @@
 /**
  * BeaconScanner Service
  *
- * Uses react-native-ble-plx to discover Phoenix beacons
+ * Uses native BLEBeaconScanner module to discover Phoenix beacons
  * and decode their sensor data
  */
 
-import { BleManager, Device, State } from 'react-native-ble-plx';
-import { decodeBeaconData, ibeaconToBeacon, IBEACON_COMPANY_ID, type BeaconData } from '@phoenix/beacon-protocol';
+import { decodeBeaconData, hexToBuffer, type BeaconData } from '@phoenix/beacon-protocol';
 import { PermissionsAndroid, Platform } from 'react-native';
-import { Buffer } from 'buffer';
+import BLEBeaconScanner, { type BeaconDiscoveredEvent } from '../modules/BLEBeaconScanner';
+import type { EmitterSubscription } from 'react-native';
 
 export type ScannerStatus = 'idle' | 'starting' | 'scanning' | 'stopping' | 'error';
+
+export interface LocationHistoryPoint {
+  latitude: number;
+  longitude: number;
+  altitude: number;
+  timestamp: number;
+}
 
 export interface DiscoveredBeacon {
   id: string; // Device ID from beacon packet
   deviceId: string; // BLE device ID
   deviceName: string;
   beaconData: BeaconData | null;
-  rssi: number;
+  rssi: number; // Smoothed RSSI value
+  rawRssi: number; // Raw/instant RSSI value
   lastSeen: number;
   rawData: string;
+  rssiHistory: number[]; // For smoothing
+  usingCachedGPS: boolean; // True if using cached GPS from previous valid reading
+  locationHistory: LocationHistoryPoint[]; // Track movement over time
 }
 
 export interface ScannerState {
@@ -29,16 +40,33 @@ export interface ScannerState {
 }
 
 export class BeaconScanner {
-  private bleManager: BleManager;
   private state: ScannerState = {
     status: 'idle',
     error: null,
     beaconsFound: new Map(),
   };
   private stateChangeCallback: ((state: ScannerState) => void) | null = null;
+  private beaconDiscoverySubscription: EmitterSubscription | null = null;
+  private scanningStateSubscription: EmitterSubscription | null = null;
 
   constructor() {
-    this.bleManager = new BleManager();
+    // Set up event listeners for native module
+    const discoverySubscription = BLEBeaconScanner.onBeaconDiscovered(
+      (event: BeaconDiscoveredEvent) => {
+        this.handleBeaconDiscovered(event);
+      }
+    );
+    this.beaconDiscoverySubscription = discoverySubscription;
+
+    const stateSubscription = BLEBeaconScanner.onScanningStateChange(
+      (event) => {
+        console.log('Scanning state changed:', event);
+        if (event.error) {
+          this.updateState('error', event.error);
+        }
+      }
+    );
+    this.scanningStateSubscription = stateSubscription;
   }
 
   /**
@@ -49,12 +77,13 @@ export class BeaconScanner {
       // Request permissions
       await this.requestPermissions();
 
-      // Check Bluetooth state
-      const btState = await this.bleManager.state();
-      console.log('Bluetooth state:', btState);
+      // Initialize native scanner
+      const result = await BLEBeaconScanner.initializeScanner();
+      console.log('BLE Scanner initialized:', result);
 
-      if (btState !== State.PoweredOn) {
-        throw new Error(`Bluetooth is ${btState}. Please enable Bluetooth.`);
+      // Check Bluetooth state
+      if (result.state !== 'poweredOn') {
+        throw new Error(`Bluetooth is ${result.state}. Please enable Bluetooth.`);
       }
 
       console.log('BeaconScanner initialized successfully');
@@ -82,22 +111,8 @@ export class BeaconScanner {
 
       console.log('Starting BLE scan...');
 
-      // Start scanning - allow duplicates to get RSSI updates
-      this.bleManager.startDeviceScan(
-        null, // No service UUID filter
-        { allowDuplicates: true },
-        (error, device) => {
-          if (error) {
-            console.error('BLE scan error:', error);
-            this.updateState('error', `Scan error: ${error.message}`);
-            return;
-          }
-
-          if (device) {
-            this.handleDeviceDiscovered(device);
-          }
-        }
-      );
+      // Start native scanning
+      await BLEBeaconScanner.startScanning();
 
       this.updateState('scanning');
       console.log('BLE scan started');
@@ -119,7 +134,7 @@ export class BeaconScanner {
     try {
       this.updateState('stopping');
 
-      this.bleManager.stopDeviceScan();
+      await BLEBeaconScanner.stopScanning();
       console.log('BLE scan stopped');
 
       this.updateState('idle');
@@ -131,83 +146,172 @@ export class BeaconScanner {
   }
 
   /**
-   * Handle a discovered BLE device
+   * Calculate distance between two GPS coordinates (Haversine formula)
    */
-  private handleDeviceDiscovered(device: Device): void {
+  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in meters
+  }
+
+  /**
+   * Smooth RSSI using moving average with outlier rejection
+   */
+  private smoothRSSI(newRssi: number, history: number[]): { smoothed: number; newHistory: number[] } {
+    const MAX_HISTORY = 10; // Average over last 10 readings for more stability
+
+    // Add new reading
+    const updatedHistory = [...history, newRssi];
+
+    // Keep only last MAX_HISTORY readings
+    if (updatedHistory.length > MAX_HISTORY) {
+      updatedHistory.shift();
+    }
+
+    // Remove outliers using IQR method if we have enough samples
+    let filteredHistory = updatedHistory;
+    if (updatedHistory.length >= 5) {
+      const sorted = [...updatedHistory].sort((a, b) => a - b);
+      const q1 = sorted[Math.floor(sorted.length * 0.25)];
+      const q3 = sorted[Math.floor(sorted.length * 0.75)];
+      const iqr = q3 - q1;
+      const lowerBound = q1 - 1.5 * iqr;
+      const upperBound = q3 + 1.5 * iqr;
+
+      // Filter out outliers
+      filteredHistory = updatedHistory.filter(val => val >= lowerBound && val <= upperBound);
+
+      // If we filtered too many values, use all values
+      if (filteredHistory.length < 3) {
+        filteredHistory = updatedHistory;
+      }
+    }
+
+    // Calculate weighted average (more recent = more weight)
+    let weightedSum = 0;
+    let weightSum = 0;
+    filteredHistory.forEach((val, index) => {
+      const weight = index + 1; // Linear weighting: 1, 2, 3, ...
+      weightedSum += val * weight;
+      weightSum += weight;
+    });
+
+    const smoothed = Math.round(weightedSum / weightSum);
+
+    return { smoothed, newHistory: updatedHistory };
+  }
+
+  /**
+   * Handle a discovered beacon from native module
+   */
+  private handleBeaconDiscovered(event: BeaconDiscoveredEvent): void {
     try {
-      // Check if device has manufacturer data
-      if (!device.manufacturerData) {
-        return;
-      }
+      console.log('\n========================================');
+      console.log('*** PHOENIX BEACON DETECTED ***');
+      console.log('========================================');
+      console.log(`Device: ${event.deviceName} (${event.deviceId})`);
+      console.log(`Raw RSSI: ${event.rssi} dBm`);
+      console.log(`Beacon Data: ${event.beaconData}`);
 
-      // Manufacturer data is base64 encoded
-      const manufacturerDataBuffer = Buffer.from(device.manufacturerData, 'base64');
-
-      if (manufacturerDataBuffer.length < 2) {
-        return;
-      }
-
-      // Read company ID (little-endian)
-      const companyID = manufacturerDataBuffer.readUInt16LE(0);
-
-      // DEBUG: Log ALL manufacturer data from potential Phoenix devices (Company ID 0x004C)
-      if (companyID === IBEACON_COMPANY_ID) {
-        const hexData = manufacturerDataBuffer.toString('hex').toUpperCase();
-        console.log(`🔍 DEBUG iBeacon (0x004C): ${device.name || device.id}, Data: ${hexData}, Length: ${manufacturerDataBuffer.length}`);
-      }
-
-      // Only process iBeacon packets (Apple company ID 0x004C)
-      if (companyID !== IBEACON_COMPANY_ID) {
-        return;
-      }
-
-      // Verify it's an iBeacon by checking type and length
-      if (manufacturerDataBuffer.length < 25) {
-        return;
-      }
-
-      const ibeaconType = manufacturerDataBuffer.readUInt8(2);
-      const ibeaconLength = manufacturerDataBuffer.readUInt8(3);
-
-      if (ibeaconType !== 0x02 || ibeaconLength !== 0x15) {
-        // Not an iBeacon, skip
-        return;
-      }
-
-      console.log(`PHOENIX BEACON DETECTED! Device: ${device.name || device.id}, RSSI: ${device.rssi}`);
-
-      // Extract 20-byte beacon data from iBeacon format
-      const beaconDataBuffer = ibeaconToBeacon(manufacturerDataBuffer);
+      // Convert hex string to buffer
+      const beaconDataBuffer = hexToBuffer(event.beaconData);
 
       // Decode beacon data
       const beaconData = decodeBeaconData(beaconDataBuffer);
 
-      // Convert to hex for raw data display
-      const hexData = manufacturerDataBuffer.toString('hex').toUpperCase();
+      console.log(`Beacon ID: ${beaconData.deviceId}`);
+      console.log(`Location: (${beaconData.latitude.toFixed(6)}, ${beaconData.longitude.toFixed(6)})`);
+      console.log(`Battery: ${beaconData.battery}%`);
+      console.log(`GPS Valid: ${beaconData.flags.gpsValid}`);
+      console.log(`Motion Detected: ${beaconData.flags.motionDetected}`);
 
-      // Create beacon entry
+      // Get existing beacon for RSSI smoothing and location history
+      const existingBeacon = this.state.beaconsFound.get(beaconData.deviceId);
+      const rssiHistory = existingBeacon?.rssiHistory || [];
+      const locationHistory = existingBeacon?.locationHistory || [];
+
+      // Smooth RSSI
+      const { smoothed, newHistory } = this.smoothRSSI(event.rssi, rssiHistory);
+
+      // Update location history if GPS is valid and position changed
+      const MAX_HISTORY = 10;
+      let updatedLocationHistory = [...locationHistory];
+      if (beaconData.flags.gpsValid) {
+        // Only add if position changed by > 5 meters or it's the first entry
+        const lastPoint = updatedLocationHistory[updatedLocationHistory.length - 1];
+        const shouldAdd = !lastPoint || this.calculateDistance(
+          lastPoint.latitude,
+          lastPoint.longitude,
+          beaconData.latitude,
+          beaconData.longitude
+        ) > 5; // 5 meters threshold
+
+        if (shouldAdd) {
+          updatedLocationHistory.push({
+            latitude: beaconData.latitude,
+            longitude: beaconData.longitude,
+            altitude: beaconData.altitudeMSL,
+            timestamp: event.timestamp,
+          });
+
+          // Keep only last 10 points
+          if (updatedLocationHistory.length > MAX_HISTORY) {
+            updatedLocationHistory.shift();
+          }
+
+          console.log(`Location history updated: ${updatedLocationHistory.length} points`);
+        }
+      }
+
+      console.log(`Smoothed RSSI: ${smoothed} dBm (from ${newHistory.length} samples)`);
+
+      // Preserve last known GPS coordinates if current GPS is invalid
+      let finalBeaconData = beaconData;
+      let usingCachedGPS = false;
+
+      if (!beaconData.flags.gpsValid && existingBeacon?.beaconData?.flags.gpsValid) {
+        console.log('⚠️ GPS signal lost - retaining last known coordinates');
+        console.log(`Last known: (${existingBeacon.beaconData.latitude.toFixed(6)}, ${existingBeacon.beaconData.longitude.toFixed(6)})`);
+
+        // Keep last known GPS coordinates but update other data
+        finalBeaconData = {
+          ...beaconData,
+          latitude: existingBeacon.beaconData.latitude,
+          longitude: existingBeacon.beaconData.longitude,
+          altitudeMSL: existingBeacon.beaconData.altitudeMSL,
+        };
+        usingCachedGPS = true;
+      }
+
+      console.log('========================================\n');
+
+      // Create/update beacon entry
       const beacon: DiscoveredBeacon = {
         id: beaconData.deviceId,
-        deviceId: device.id,
-        deviceName: device.name || 'Unknown',
-        beaconData,
-        rssi: device.rssi || 0,
-        lastSeen: Date.now(),
-        rawData: hexData,
+        deviceId: event.deviceId,
+        deviceName: event.deviceName,
+        beaconData: finalBeaconData,
+        rssi: smoothed,
+        rawRssi: event.rssi,
+        lastSeen: event.timestamp,
+        rawData: event.beaconData,
+        rssiHistory: newHistory,
+        usingCachedGPS,
+        locationHistory: updatedLocationHistory,
       };
 
       // Update or add beacon
       this.state.beaconsFound.set(beaconData.deviceId, beacon);
       this.notifyStateChange();
 
-      console.log(
-        `Beacon discovered: ${beaconData.deviceId} at (${beaconData.latitude.toFixed(6)}, ${beaconData.longitude.toFixed(6)}) RSSI: ${device.rssi}`
-      );
+      console.log(`Total Phoenix beacons found: ${this.state.beaconsFound.size}`);
     } catch (error) {
-      // Silently ignore decode errors for non-Phoenix devices
-      if (device.name?.includes('Phoenix')) {
-        console.error('Failed to decode beacon data:', error);
-      }
+      console.error('Failed to decode beacon data:', error);
     }
   }
 
@@ -231,11 +335,12 @@ export class BeaconScanner {
   }
 
   /**
-   * Clear old beacons (not seen in last 30 seconds)
+   * Clear old beacons (not seen in last 60 seconds)
+   * Extended from 30s to 60s to accommodate GPS fallback mode
    */
   clearStaleBeacons(): void {
     const now = Date.now();
-    const staleThreshold = 30000; // 30 seconds
+    const staleThreshold = 60000; // 60 seconds (allows for GPS fallback)
 
     for (const [id, beacon] of this.state.beaconsFound.entries()) {
       if (now - beacon.lastSeen > staleThreshold) {
@@ -315,6 +420,14 @@ export class BeaconScanner {
    */
   async destroy(): Promise<void> {
     await this.stopScanning();
-    await this.bleManager.destroy();
+
+    // Clean up event listeners
+    if (this.beaconDiscoverySubscription) {
+      this.beaconDiscoverySubscription.remove();
+    }
+
+    if (this.scanningStateSubscription) {
+      this.scanningStateSubscription.remove();
+    }
   }
 }

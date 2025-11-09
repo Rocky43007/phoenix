@@ -42,7 +42,8 @@ export const FLAGS = {
   LOW_BATTERY: 0x08,        // Bit 3: Battery < 20%
   GPS_VALID: 0x10,          // Bit 4: GPS has valid fix
   STATIONARY: 0x20,         // Bit 5: No motion for 5+ minutes
-  // Bits 6-7: Reserved for future use
+  FALL_DETECTED: 0x40,      // Bit 6: Fall detected (rapid decel + horizontal position)
+  UNSTABLE_ENV: 0x80,       // Bit 7: Unstable environment (high vibration/shaking)
 } as const;
 
 // Two-way Commands (sent from receiver to emitter)
@@ -55,10 +56,11 @@ export const COMMANDS = {
 
 // Advertisement Configuration
 export const ADVERTISEMENT_CONFIG = {
-  INTERVAL_NORMAL: 3000,        // 3 seconds (balanced mode)
-  INTERVAL_POWER_SAVE: 5000,    // 5 seconds (battery < 50%)
-  INTERVAL_CRITICAL: 10000,     // 10 seconds (battery < 20%)
-  INTERVAL_ACTIVE: 2000,        // 2 seconds (motion detected)
+  INTERVAL_EMERGENCY: 1000,     // 1 second (SOS/Fall detected - priority!)
+  INTERVAL_ACTIVE: 2000,        // 2 seconds (motion detected + good battery)
+  INTERVAL_NORMAL: 5000,        // 5 seconds (stationary + good battery)
+  INTERVAL_POWER_SAVE: 10000,   // 10 seconds (low battery)
+  INTERVAL_CRITICAL: 15000,     // 15 seconds (critical battery < 10%)
   TX_POWER: 0,                  // 0 dBm (balanced range/battery)
 } as const;
 

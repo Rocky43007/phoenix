@@ -98,14 +98,10 @@ export class BeaconTransmitter {
         console.log('Altimeter updates unavailable:', e)
       );
 
-      // Start advertising loop
-      this.advertisingInterval = setInterval(
-        () => this.transmitBeacon(),
-        ADVERTISEMENT_CONFIG.INTERVAL_NORMAL
-      );
-
       // Send first beacon immediately
       await this.transmitBeacon();
+
+      // Note: Interval will be set dynamically in transmitBeacon() based on conditions
 
       this.updateState('advertising');
     } catch (error) {
@@ -166,13 +162,27 @@ export class BeaconTransmitter {
       const packet = encodeBeaconData(encoderInput);
       const hexData = bufferToHex(packet);
 
+      // Get current sensor data for accuracy logging
+      const currentSensorData = await SensorDataModule.getAllSensorData();
+      const gpsAccuracy = currentSensorData.location?.accuracy ?? 'N/A';
+
       console.log(`Transmitting beacon: ${hexData}`);
       console.log(`  📦 Payload size: ${packet.length} bytes (hex: ${hexData.length / 2} bytes)`);
-      console.log('  Location:', encoderInput.latitude.toFixed(6), encoderInput.longitude.toFixed(6));
+      console.log('  Location:', encoderInput.latitude.toFixed(6), encoderInput.longitude.toFixed(6), 'Alt:', encoderInput.altitudeMSL + 'm');
+      console.log(`  GPS Accuracy: ${typeof gpsAccuracy === 'number' ? gpsAccuracy.toFixed(1) + 'm' : gpsAccuracy}`);
       console.log('  Battery:', encoderInput.battery + '%');
-      console.log('  Flags: GPS:', encoderInput.gpsValid, 'Motion:', encoderInput.motionDetected);
+      console.log('  Flags:');
+      console.log('    GPS Valid:', encoderInput.gpsValid, `(accuracy ${typeof gpsAccuracy === 'number' ? '< 200m' : 'unknown'})`);
+      console.log('    Motion:', encoderInput.motionDetected);
+      console.log('    Fall:', encoderInput.fallDetected);
+      console.log('    Unstable:', encoderInput.unstableEnvironment);
 
-      // Start BLE advertising with beacon data
+      // Stop current advertising before starting with new data
+      await BLEPeripheralManager.stopAdvertising().catch(() => {
+        // Ignore error if not advertising
+      });
+
+      // Start BLE advertising with new beacon data
       await BLEPeripheralManager.startAdvertising(hexData);
 
       // Update state
@@ -180,11 +190,54 @@ export class BeaconTransmitter {
       this.state.transmissionCount++;
       this.notifyStateChange();
 
+      // Adaptive interval based on conditions
+      const interval = this.calculateAdaptiveInterval(encoderInput);
+
+      // Clear old interval and set new one
+      if (this.advertisingInterval) {
+        clearInterval(this.advertisingInterval);
+      }
+
+      this.advertisingInterval = setInterval(
+        () => this.transmitBeacon(),
+        interval
+      );
+
+      console.log(`📡 Next transmission in ${interval / 1000}s`);
+
     } catch (error) {
       console.error('Failed to transmit beacon:', error);
       this.state.error = `Transmission failed: ${error}`;
       this.notifyStateChange();
     }
+  }
+
+  /**
+   * Calculate adaptive interval based on battery, motion, and priority flags
+   */
+  private calculateAdaptiveInterval(data: any): number {
+    // Priority 1: Emergency situations - fastest updates
+    if (data.sosActivated || data.fallDetected || data.unstableEnvironment) {
+      return ADVERTISEMENT_CONFIG.INTERVAL_EMERGENCY;
+    }
+
+    // Priority 2: Critical battery - conserve power
+    if (data.battery < 10) {
+      return ADVERTISEMENT_CONFIG.INTERVAL_CRITICAL;
+    }
+
+    // Priority 3: Low battery - save power
+    if (data.lowBattery) { // < 20%
+      return ADVERTISEMENT_CONFIG.INTERVAL_POWER_SAVE;
+    }
+
+    // Priority 4: Active (moving) - frequent updates
+    if (data.motionDetected) {
+      return ADVERTISEMENT_CONFIG.INTERVAL_ACTIVE;
+    }
+
+    // Default: Stationary with good battery - balanced
+    return ADVERTISEMENT_CONFIG.INTERVAL_NORMAL;
   }
 
   /**

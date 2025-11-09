@@ -1,10 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ScrollView, View, StyleSheet, RefreshControl, Text as RNText, TouchableOpacity } from 'react-native';
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { APP_NAME } from '@phoenix/utils';
 import { BeaconScanner, type DiscoveredBeacon, type ScannerState } from './src/services/BeaconScanner';
+import NativeLogger from './src/modules/NativeLogger';
+import { PrecisionFindingView } from './src/components/PrecisionFindingView';
 
-export default function App() {
+function AppContent() {
+  // Initialize native logger to forward native logs to Metro console
+  useEffect(() => {
+    NativeLogger.startLogging();
+    return () => {
+      NativeLogger.stopLogging();
+    };
+  }, []);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [scannerState, setScannerState] = useState<ScannerState | null>(null);
@@ -12,6 +22,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState<boolean>(false);
   const [bluetoothReady, setBluetoothReady] = useState<boolean>(false);
+  const [selectedBeacon, setSelectedBeacon] = useState<DiscoveredBeacon | null>(null);
   const scannerRef = useRef<BeaconScanner | null>(null);
 
   useEffect(() => {
@@ -28,19 +39,30 @@ export default function App() {
     let interval: NodeJS.Timeout | null = null;
 
     if (isScanning) {
+      // Update every 250ms - responsive updates with acceptable battery drain
+      // 250ms = 4 updates/sec - smooth experience for precision finding
       interval = setInterval(() => {
         if (scannerRef.current) {
           scannerRef.current.clearStaleBeacons();
           const currentBeacons = scannerRef.current.getBeacons();
           setBeacons(currentBeacons);
+
+          // Update selected beacon if it's still in the list
+          if (selectedBeacon) {
+            const updatedBeacon = currentBeacons.find(b => b.id === selectedBeacon.id);
+            if (updatedBeacon) {
+              setSelectedBeacon(updatedBeacon);
+            }
+            // Don't kick out the user if beacon disappears - let PrecisionFindingView handle it
+          }
         }
-      }, 1000);
+      }, 250); // 4 updates per second - smooth and responsive
     }
 
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isScanning]);
+  }, [isScanning, selectedBeacon]);
 
   const requestPermissions = async () => {
     try {
@@ -123,8 +145,26 @@ export default function App() {
     return 'Weak';
   };
 
+  // Show precision finding view if a beacon is selected
+  if (selectedBeacon) {
+    return (
+      <SafeAreaView style={styles.precisionContainer} edges={['top', 'left', 'right']}>
+        <View style={styles.precisionContent}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => setSelectedBeacon(null)}
+          >
+            <RNText style={styles.backButtonText}>←</RNText>
+          </TouchableOpacity>
+          <PrecisionFindingView beacon={selectedBeacon} />
+        </View>
+        <StatusBar style="light" />
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -184,16 +224,71 @@ export default function App() {
           </View>
         )}
 
+        {beacons.length > 0 && (
+          <View style={styles.statsCard}>
+            <RNText style={styles.statsTitle}>Quick Stats</RNText>
+            <View style={styles.statsGrid}>
+              <View style={styles.statItem}>
+                <RNText style={styles.statValue}>{beacons.length}</RNText>
+                <RNText style={styles.statLabel}>Beacons</RNText>
+              </View>
+              <View style={styles.statItem}>
+                <RNText style={styles.statValue}>
+                  {beacons.filter(b => b.beaconData?.flags.sosActivated || b.beaconData?.flags.fallDetected).length}
+                </RNText>
+                <RNText style={styles.statLabel}>Priority</RNText>
+              </View>
+              <View style={styles.statItem}>
+                <RNText style={styles.statValue}>
+                  {beacons.filter(b => b.beaconData?.flags.gpsValid).length}
+                </RNText>
+                <RNText style={styles.statLabel}>GPS Lock</RNText>
+              </View>
+              <View style={styles.statItem}>
+                <RNText style={styles.statValue}>
+                  {beacons.filter(b => b.beaconData?.flags.lowBattery).length}
+                </RNText>
+                <RNText style={styles.statLabel}>Low Battery</RNText>
+              </View>
+            </View>
+          </View>
+        )}
+
         {beacons.length > 0 ? (
           <View style={styles.beaconsSection}>
             <RNText style={styles.sectionTitle}>Discovered Beacons ({beacons.length})</RNText>
 
             {beacons.map((beacon) => (
-              <View key={beacon.id} style={styles.beaconCard}>
+              <TouchableOpacity
+                key={beacon.id}
+                style={styles.beaconCard}
+                onPress={() => setSelectedBeacon(beacon)}
+              >
                 <View style={styles.beaconHeader}>
                   <RNText style={styles.beaconId}>{beacon.id}</RNText>
                   <RNText style={styles.lastSeen}>{formatTimeSince(beacon.lastSeen)}</RNText>
                 </View>
+
+                {/* Priority Alerts in list */}
+                {beacon.beaconData && (beacon.beaconData.flags.fallDetected || beacon.beaconData.flags.unstableEnvironment || beacon.beaconData.flags.sosActivated) && (
+                  <View style={styles.priorityAlertsRow}>
+                    {beacon.beaconData.flags.sosActivated && (
+                      <View style={[styles.priorityBadge, styles.priorityCritical]}>
+                        <RNText style={styles.priorityBadgeText}>SOS</RNText>
+                      </View>
+                    )}
+                    {beacon.beaconData.flags.fallDetected && (
+                      <View style={[styles.priorityBadge, styles.priorityUrgent]}>
+                        <RNText style={styles.priorityBadgeText}>Fall</RNText>
+                      </View>
+                    )}
+                    {beacon.beaconData.flags.unstableEnvironment && (
+                      <View style={[styles.priorityBadge, styles.priorityWarning]}>
+                        <RNText style={styles.priorityBadgeText}>Unstable</RNText>
+                      </View>
+                    )}
+                  </View>
+                )}
 
                 <View style={styles.signalInfo}>
                   <RNText style={styles.dataText}>
@@ -234,9 +329,19 @@ export default function App() {
                           Low Battery: {beacon.beaconData.flags.lowBattery ? 'Yes' : 'No'}
                         </RNText>
                       </View>
-                      <View style={[styles.flag, beacon.beaconData.flags.sos && styles.flagCritical]}>
+                      <View style={[styles.flag, beacon.beaconData.flags.sosActivated && styles.flagCritical]}>
                         <RNText style={styles.flagText}>
-                          SOS: {beacon.beaconData.flags.sos ? 'Yes' : 'No'}
+                          SOS: {beacon.beaconData.flags.sosActivated ? 'Yes' : 'No'}
+                        </RNText>
+                      </View>
+                      <View style={[styles.flag, beacon.beaconData.flags.fallDetected && styles.flagCritical]}>
+                        <RNText style={styles.flagText}>
+                          Fall: {beacon.beaconData.flags.fallDetected ? 'Yes' : 'No'}
+                        </RNText>
+                      </View>
+                      <View style={[styles.flag, beacon.beaconData.flags.unstableEnvironment && styles.flagWarn]}>
+                        <RNText style={styles.flagText}>
+                          Unstable: {beacon.beaconData.flags.unstableEnvironment ? 'Yes' : 'No'}
                         </RNText>
                       </View>
                     </View>
@@ -248,7 +353,12 @@ export default function App() {
                 ) : (
                   <RNText style={styles.noData}>Failed to decode beacon data</RNText>
                 )}
-              </View>
+
+                {/* Tap to view hint */}
+                <View style={styles.tapHint}>
+                  <RNText style={styles.tapHintText}>Tap for Precision Finding</RNText>
+                </View>
+              </TouchableOpacity>
             ))}
           </View>
         ) : isScanning ? (
@@ -264,15 +374,31 @@ export default function App() {
         )}
       </ScrollView>
 
-      <StatusBar style="auto" />
-    </View>
+      <StatusBar style="light" />
+    </SafeAreaView>
+  );
+}
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#000', // Dark theme
+  },
+  precisionContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  precisionContent: {
+    flex: 1,
+    position: 'relative',
   },
   scrollView: {
     flex: 1,
@@ -281,27 +407,31 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '700',
     textAlign: 'center',
-    marginTop: 20,
+    marginTop: 10,
+    color: '#FFF',
   },
   subtitle: {
     fontSize: 14,
     textAlign: 'center',
     marginTop: 8,
     marginBottom: 20,
-    color: '#666',
+    color: '#999',
   },
   warningBox: {
-    backgroundColor: '#FFF3CD',
+    backgroundColor: 'rgba(255, 159, 10, 0.2)',
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FF9F0A',
   },
   warningText: {
-    color: '#856404',
+    color: '#FF9F0A',
     marginBottom: 12,
+    fontSize: 14,
   },
   controlSection: {
     marginBottom: 20,
@@ -328,25 +458,31 @@ const styles = StyleSheet.create({
   statusIndicator: {
     marginTop: 12,
     padding: 12,
-    backgroundColor: '#F0F0F0',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
     alignItems: 'center',
   },
   statusActive: {
-    backgroundColor: '#E3F2FD',
+    backgroundColor: 'rgba(52, 199, 89, 0.2)',
+    borderWidth: 1,
+    borderColor: '#34C759',
   },
   statusText: {
     fontSize: 14,
     fontWeight: '600',
+    color: '#FFF',
   },
   errorBox: {
-    backgroundColor: '#F8D7DA',
+    backgroundColor: 'rgba(255, 59, 48, 0.2)',
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
   },
   errorText: {
-    color: '#721C24',
+    color: '#FF3B30',
+    fontSize: 14,
   },
   statsSection: {
     marginBottom: 20,
@@ -358,24 +494,27 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 16,
+    color: '#FFF',
   },
   dataCard: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   beaconCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    shadowColor: '#000',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#FFF',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 8,
     elevation: 3,
   },
   beaconHeader: {
@@ -399,20 +538,21 @@ const styles = StyleSheet.create({
   },
   separator: {
     height: 1,
-    backgroundColor: '#E0E0E0',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     marginVertical: 12,
   },
   sectionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#666',
+    color: '#999',
     marginBottom: 6,
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   dataText: {
     fontSize: 14,
     marginVertical: 2,
-    color: '#333',
+    color: '#FFF',
   },
   flagsRow: {
     flexDirection: 'row',
@@ -421,36 +561,42 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   flag: {
-    backgroundColor: '#F0F0F0',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   flagActive: {
-    backgroundColor: '#D4EDDA',
+    backgroundColor: 'rgba(52, 199, 89, 0.2)',
+    borderColor: '#34C759',
   },
   flagWarn: {
-    backgroundColor: '#FFF3CD',
+    backgroundColor: 'rgba(255, 159, 10, 0.2)',
+    borderColor: '#FF9F0A',
   },
   flagCritical: {
-    backgroundColor: '#F8D7DA',
+    backgroundColor: 'rgba(255, 59, 48, 0.2)',
+    borderColor: '#FF3B30',
   },
   flagText: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#FFF',
   },
   rawData: {
     fontSize: 11,
     fontFamily: 'monospace',
-    color: '#666',
-    backgroundColor: '#F5F5F5',
+    color: '#999',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     padding: 8,
     borderRadius: 4,
     marginTop: 4,
   },
   noData: {
     fontSize: 14,
-    color: '#999',
+    color: '#666',
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 12,
@@ -462,11 +608,104 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 18,
-    color: '#666',
+    color: '#999',
     marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
+    color: '#666',
+  },
+  backButton: {
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    zIndex: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  backButtonText: {
+    color: '#FFF',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  tapHint: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+  },
+  tapHintText: {
+    fontSize: 13,
+    color: '#007AFF',
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  priorityAlertsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginVertical: 8,
+  },
+  priorityBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  priorityCritical: {
+    backgroundColor: 'rgba(255, 59, 48, 0.2)',
+    borderColor: '#FF3B30',
+  },
+  priorityUrgent: {
+    backgroundColor: 'rgba(255, 159, 10, 0.2)',
+    borderColor: '#FF9F0A',
+  },
+  priorityWarning: {
+    backgroundColor: 'rgba(255, 204, 0, 0.2)',
+    borderColor: '#FFCC00',
+  },
+  priorityBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  statsCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  statsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 12,
+    color: '#FFF',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#007AFF',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 11,
     color: '#999',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });

@@ -22,6 +22,8 @@ export interface BeaconFlags {
   lowBattery: boolean;
   gpsValid: boolean;
   stationary: boolean;
+  fallDetected: boolean;         // Person has fallen (priority alert)
+  unstableEnvironment: boolean;  // High vibration/shaking (collapsing building)
 }
 
 // Emitter with metadata (used by receiver app)
@@ -95,6 +97,8 @@ export interface EncoderInput {
   lowBattery: boolean;
   gpsValid: boolean;
   stationary: boolean;
+  fallDetected: boolean;
+  unstableEnvironment: boolean;
 }
 
 // Decoder output

@@ -21,7 +21,8 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
 
     companion object {
         private const val TAG = "BLEBeaconScanner"
-        private const val IBEACON_COMPANY_ID = 0x004C // Apple Inc.
+        private const val PHOENIX_COMPANY_ID_SAMSUNG = 0x0075 // Samsung (Android emitter)
+        private const val PHOENIX_COMPANY_ID_APPLE = 0x004C // Apple (iOS emitter)
     }
 
     override fun getName(): String {
@@ -51,7 +52,9 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
         override fun onScanFailed(errorCode: Int) {
             super.onScanFailed(errorCode)
             isScanning = false
-            Log.e(TAG, "BLE scan failed: ${getScanErrorMessage(errorCode)}")
+            val errorMsg = "BLE scan failed: ${getScanErrorMessage(errorCode)}"
+            Log.e(TAG, errorMsg)
+            NativeLogger.error(TAG, errorMsg)
 
             sendEvent("onScanningStateChange", Arguments.createMap().apply {
                 putBoolean("scanning", false)
@@ -104,10 +107,13 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Configure scan settings for low latency (better detection)
+            // Configure scan settings for optimal performance
             val settings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .setReportDelay(0) // Report immediately, don't batch
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY) // Most responsive
+                .setReportDelay(0) // Report immediately, no batching
+                .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES) // Report all matches
+                .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE) // More aggressive matching
+                .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT) // Max advertisements
                 .build()
 
             // Start scanning (no filters - we'll filter in callback)
@@ -115,6 +121,7 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
             isScanning = true
 
             Log.d(TAG, "BLE beacon scanning started")
+            NativeLogger.info(TAG, "BLE beacon scanning started")
 
             sendEvent("onScanningStateChange", Arguments.createMap().apply {
                 putBoolean("scanning", true)
@@ -145,6 +152,7 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
             isScanning = false
 
             Log.d(TAG, "BLE beacon scanning stopped")
+            NativeLogger.info(TAG, "BLE beacon scanning stopped")
 
             sendEvent("onScanningStateChange", Arguments.createMap().apply {
                 putBoolean("scanning", false)
@@ -186,48 +194,91 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
         }
     }
 
+    // Required for New Architecture event emitter
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Keep: Required for RN built-in Event Emitter Calls
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Keep: Required for RN built-in Event Emitter Calls
+    }
+
     private fun processScanResult(result: ScanResult) {
         try {
             val scanRecord = result.scanRecord ?: return
+
+            // Log ALL discovered BLE devices to native logcat only (verbose)
+            val deviceInfo = buildString {
+                append("BLE Device Discovered:\n")
+                append("  Name: ${result.device.name ?: "No Name"}\n")
+                append("  Address: ${result.device.address}\n")
+                append("  RSSI: ${result.rssi}")
+            }
+            Log.d(TAG, deviceInfo)
+
             val manufacturerData = scanRecord.manufacturerSpecificData
 
-            // Look for Apple company ID (0x004C)
-            val ibeaconData = manufacturerData.get(IBEACON_COMPANY_ID) ?: return
-
-            // Validate iBeacon format: Type(0x02) + Length(0x15) = 23 bytes total
-            if (ibeaconData.size < 23) {
+            // Check if manufacturer data exists
+            if (manufacturerData == null || manufacturerData.size() == 0) {
+                Log.d(TAG, "  No manufacturer data")
                 return
             }
 
-            // Check iBeacon type and length
-            if (ibeaconData[0] != 0x02.toByte() || ibeaconData[1] != 0x15.toByte()) {
+            // Log manufacturer data
+            val mfgInfo = buildString {
+                append("  Manufacturer Data:")
+                for (i in 0 until manufacturerData.size()) {
+                    val companyId = manufacturerData.keyAt(i)
+                    val data = manufacturerData.valueAt(i)
+                    val hexData = data.joinToString("") { String.format("%02X", it) }
+                    append("\n    Company ID: 0x${String.format("%04X", companyId)} Data: $hexData")
+                }
+            }
+            Log.d(TAG, mfgInfo)
+
+            // Look for Phoenix beacon in Samsung (Android) or Apple (iOS) manufacturer data
+            val phoenixData = manufacturerData.get(PHOENIX_COMPANY_ID_SAMSUNG)
+                ?: manufacturerData.get(PHOENIX_COMPANY_ID_APPLE)
+                ?: return
+
+            // Validate Phoenix beacon format: magic (2 bytes) + data (20 bytes) = 22 bytes
+            if (phoenixData.size != 22) {
+                Log.d(TAG, "Not Phoenix beacon - size: ${phoenixData.size} bytes (expected 22)")
                 return
             }
 
-            Log.d(TAG, "🔍 PHOENIX BEACON DETECTED!")
-            Log.d(TAG, "  Device: ${result.device.name ?: result.device.address}")
-            Log.d(TAG, "  RSSI: ${result.rssi}")
+            // Check for Phoenix magic number (0x5048 = "PH")
+            val magic = ((phoenixData[1].toInt() and 0xFF) shl 8) or (phoenixData[0].toInt() and 0xFF)
+            if (magic != 0x5048) {
+                Log.d(TAG, "Not Phoenix beacon - magic: 0x${String.format("%04X", magic)} (expected 0x5048)")
+                return
+            }
 
-            // Extract 20-byte beacon data from iBeacon format
-            // Format: [Type(1)] + [Length(1)] + [UUID(16)] + [Major(2)] + [Minor(2)] + [TxPower(1)]
+            val beaconDetected = buildString {
+                append("\n========================================\n")
+                append("*** PHOENIX BEACON DETECTED ***\n")
+                append("========================================\n")
+                append("Device: ${result.device.name ?: result.device.address}\n")
+                append("RSSI: ${result.rssi} dBm")
+            }
+            Log.d(TAG, beaconDetected)
+            NativeLogger.info(TAG, beaconDetected)
+
+            // Extract the 20-byte beacon data (skip first 2 bytes which are magic)
             val beaconDataBytes = ByteArray(20)
+            System.arraycopy(phoenixData, 2, beaconDataBytes, 0, 20)
 
-            // Copy UUID (16 bytes)
-            System.arraycopy(ibeaconData, 2, beaconDataBytes, 0, 16)
-
-            // Copy Major (2 bytes)
-            System.arraycopy(ibeaconData, 18, beaconDataBytes, 16, 2)
-
-            // Copy Minor (2 bytes)
-            System.arraycopy(ibeaconData, 20, beaconDataBytes, 18, 2)
-
-            // Extract measured power (TX power at 1m)
-            val measuredPower = ibeaconData[22].toInt()
+            // For distance estimation, use a default measured power
+            // This can be calibrated later or added to the beacon format
+            val measuredPower = -59 // Default RSSI at 1 meter
 
             // Convert to hex string
             val hexData = beaconDataBytes.joinToString("") { String.format("%02X", it) }
 
             Log.d(TAG, "  Beacon Data: $hexData")
+            NativeLogger.info(TAG, "  Beacon Data: $hexData")
 
             // Send event to React Native
             val event = Arguments.createMap().apply {
@@ -242,7 +293,9 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
             sendEvent("onBeaconDiscovered", event)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing scan result: ${e.message}")
+            val errorMsg = "Error processing scan result: ${e.message}"
+            Log.e(TAG, errorMsg)
+            NativeLogger.error(TAG, errorMsg)
         }
     }
 
