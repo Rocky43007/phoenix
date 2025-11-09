@@ -264,7 +264,7 @@ extension BLEBeaconScanner: CBCentralManagerDelegate {
     if hasListeners {
       sendEvent(withName: "onBeaconDiscovered", body: [
         "deviceId": peripheral.identifier.uuidString,
-        "deviceName": peripheral.name ?? "Unknown",
+        "deviceName": peripheral.name ?? peripheral.identifier.uuidString,
         "beaconData": beaconInfo["beaconData"] ?? "",
         "rssi": RSSI.intValue,
         "measuredPower": beaconInfo["measuredPower"] ?? -59,

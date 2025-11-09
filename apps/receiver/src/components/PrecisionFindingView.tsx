@@ -544,7 +544,7 @@ DIRECTION DEBUG${gpsStatus}:
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.deviceName}>
-          {beacon.beaconData ? 'Phoenix Beacon' : beacon.id}
+          {beacon.deviceName}
         </Text>
 
         {/* Signal and update info */}

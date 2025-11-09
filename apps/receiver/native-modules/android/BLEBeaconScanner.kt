@@ -283,7 +283,7 @@ class BLEBeaconScanner(reactContext: ReactApplicationContext) :
             // Send event to React Native
             val event = Arguments.createMap().apply {
                 putString("deviceId", result.device.address)
-                putString("deviceName", result.device.name ?: "Unknown")
+                putString("deviceName", result.device.name ?: result.device.address)
                 putString("beaconData", hexData)
                 putInt("rssi", result.rssi)
                 putInt("measuredPower", measuredPower)

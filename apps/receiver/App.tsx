@@ -265,7 +265,7 @@ function AppContent() {
                 onPress={() => setSelectedBeacon(beacon)}
               >
                 <View style={styles.beaconHeader}>
-                  <RNText style={styles.beaconId}>{beacon.id}</RNText>
+                  <RNText style={styles.beaconId}>{beacon.deviceName}</RNText>
                   <RNText style={styles.lastSeen}>{formatTimeSince(beacon.lastSeen)}</RNText>
                 </View>
 
