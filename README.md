@@ -81,8 +81,8 @@ Total Source Code: ~11,278 lines
 pnpm install
 
 # Generate native projects (these are gitignored)
-cd apps/emitter && npx expo prebuild
-cd ../receiver && npx expo prebuild
+cd apps/emitter && pnpx expo prebuild
+cd ../receiver && pnpx expo prebuild
 ```
 
 ### Running the Apps
@@ -212,8 +212,8 @@ The iOS and Android directories are **generated** by `expo prebuild` and are **n
 
 ```bash
 # Generate native projects
-cd apps/emitter && npx expo prebuild
-cd ../receiver && npx expo prebuild
+cd apps/emitter && pnpx expo prebuild
+cd ../receiver && pnpx expo prebuild
 ```
 
 ### Native Module Development
