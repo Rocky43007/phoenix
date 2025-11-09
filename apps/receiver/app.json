@@ -8,6 +8,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "plugins": [
+      "./plugins/withReceiverNativeModules.js",
       [
         "react-native-ble-plx",
         {

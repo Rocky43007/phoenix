@@ -105,12 +105,17 @@ class BLEPeripheralManager: NSObject {
       var manufacturerData = Data()
       manufacturerData.append(UInt8(companyID & 0xFF))
       manufacturerData.append(UInt8((companyID >> 8) & 0xFF))
-      manufacturerData.append(ibeaconData)
+      manufacturerData.append(contentsOf: ibeaconData)
+
+      print("iBeacon data length: \(ibeaconData.count)")
+      print("Manufacturer data length: \(manufacturerData.count)")
+      print("iBeacon data: \(ibeaconData.map { String(format: "%02X", $0) }.joined())")
+      print("Full manufacturer data: \(manufacturerData.map { String(format: "%02X", $0) }.joined())")
 
       // Create advertising data
+      // Note: NOT including device name to stay within BLE advertisement size limits
       let advertisementData: [String: Any] = [
-        CBAdvertisementDataManufacturerDataKey: manufacturerData,
-        CBAdvertisementDataLocalNameKey: "Phoenix-Beacon"
+        CBAdvertisementDataManufacturerDataKey: manufacturerData
       ]
 
       // Start advertising
@@ -118,8 +123,6 @@ class BLEPeripheralManager: NSObject {
       self.isAdvertising = true
 
       print("Started iBeacon advertising with \(data.count) bytes of beacon data")
-      print("iBeacon data: \(ibeaconData.map { String(format: "%02X", $0) }.joined())")
-      print("Full manufacturer data (Company ID + iBeacon): \(manufacturerData.map { String(format: "%02X", $0) }.joined())")
 
       resolve([
         "advertising": true,

@@ -150,6 +150,12 @@ export class BeaconScanner {
       // Read company ID (little-endian)
       const companyID = manufacturerDataBuffer.readUInt16LE(0);
 
+      // DEBUG: Log ALL manufacturer data from potential Phoenix devices (Company ID 0x004C)
+      if (companyID === IBEACON_COMPANY_ID) {
+        const hexData = manufacturerDataBuffer.toString('hex').toUpperCase();
+        console.log(`🔍 DEBUG iBeacon (0x004C): ${device.name || device.id}, Data: ${hexData}, Length: ${manufacturerDataBuffer.length}`);
+      }
+
       // Only process iBeacon packets (Apple company ID 0x004C)
       if (companyID !== IBEACON_COMPANY_ID) {
         return;

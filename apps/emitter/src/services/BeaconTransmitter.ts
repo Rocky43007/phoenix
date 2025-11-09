@@ -167,6 +167,7 @@ export class BeaconTransmitter {
       const hexData = bufferToHex(packet);
 
       console.log(`Transmitting beacon: ${hexData}`);
+      console.log(`  📦 Payload size: ${packet.length} bytes (hex: ${hexData.length / 2} bytes)`);
       console.log('  Location:', encoderInput.latitude.toFixed(6), encoderInput.longitude.toFixed(6));
       console.log('  Battery:', encoderInput.battery + '%');
       console.log('  Flags: GPS:', encoderInput.gpsValid, 'Motion:', encoderInput.motionDetected);

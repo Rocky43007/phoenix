@@ -129,9 +129,10 @@ class BLEPeripheralManager(reactContext: ReactApplicationContext) :
                 .build()
 
             // Configure advertising data with iBeacon format
+            // Note: NOT including device name to stay within 31-byte BLE advertisement limit
             val advertiseData = AdvertiseData.Builder()
                 .addManufacturerData(companyId, ibeaconData)
-                .setIncludeDeviceName(true)
+                .setIncludeDeviceName(false)
                 .build()
 
             // Start advertising
