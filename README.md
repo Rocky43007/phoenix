@@ -227,7 +227,7 @@ These are automatically copied during prebuild.
 
 ## 📝 License
 
-This is a disaster relief project - use it to save lives.
+This is a disaster relief project - use it to save lives. (So, MIT)
 
 ## 🤝 Contributing
 
